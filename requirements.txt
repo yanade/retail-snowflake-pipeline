@@ -1,2 +1,5 @@
 requests
 python-dotenv
+pytest
+pandas
+openpyxl
