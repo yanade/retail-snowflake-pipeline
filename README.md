@@ -29,7 +29,7 @@ detects data quality issues automatically, and alerts the team on failures.
 ┌─────────────────────────────────────────────────────────────┐
 │  SOURCES                                                    │
 │  UCI Online Retail CSV  ──┐                                 │
-│  ExchangeRate API       ──┼──▶  Azure Data Factory          │
+│  freecurrencyapi API       ──┼──▶  Azure Data Factory          │
 │  Terraform + GitHub     ──┘     (watermark incremental)     │
 └─────────────────────────────────────────────────────────────┘
                                         │
@@ -122,8 +122,9 @@ A Streamlit app reads this table live and surfaces pass/fail trends,
 row count history, and dead-letter counts.
 
 **FX enrichment**
-GBP transaction values are enriched with daily exchange rates from the
-ExchangeRate API, enabling multi-currency reporting in the star schema.
+GBP transaction values are enriched with daily exchange rates from
+[freecurrencyapi.com](https://freecurrencyapi.com) — free tier supports
+historical data back to 2010, enabling multi-currency reporting in the star schema.
 
 ---
 
@@ -160,7 +161,8 @@ retail-snowflake-pipeline/
 ## Build Progress
 
 - [x] Project architecture designed
-- [x] ExchangeRate API ingestion script (`ingestion/api_ingest/fetch_fx_rates.py`)
+- [x] FX rates ingestion script — freecurrencyapi.com (`ingestion/api_ingest/`)
+- [x] Unit tests — 15 tests passing (`tests/ingestion/api_ingest/`)
 - [ ] Terraform — Azure infrastructure
 - [ ] ADLS Gen2 — 3-zone storage with date partitioning
 - [ ] ADF — watermark-based incremental pipeline
@@ -179,10 +181,10 @@ retail-snowflake-pipeline/
 
 ### Prerequisites
 - Azure subscription
-- Snowflake account 
-- ExchangeRate API key 
-- Python 
-- Terraform 
+- Snowflake account
+- [freecurrencyapi.com](https://freecurrencyapi.com) API key — free tier sufficient
+- Python 3.11
+- Terraform >= 1.6
 - Docker (for Airflow)
 
 ### Environment variables
@@ -197,6 +199,24 @@ cd terraform
 terraform init
 terraform plan
 terraform apply
+```
+
+### Run FX rates ingestion
+
+```bash
+# activate virtual environment
+source venv/bin/activate
+
+# fetch GBP rates for a date range
+python -m ingestion.api_ingest.main --start 2010-12-02 --end 2010-12-03
+
+# output saved to ingestion/api_ingest/output/
+```
+
+### Run tests
+
+```bash
+pytest tests/ingestion/api_ingest/ -v
 ```
 
 ### Run the pipeline

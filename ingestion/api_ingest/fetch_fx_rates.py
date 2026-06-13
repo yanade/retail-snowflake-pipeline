@@ -253,7 +253,7 @@ def save_rates_to_json(
     """
 
     # Build timestamp string e.g. 20260611_143022
-    run_timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    run_timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
 
     # Build filename e.g. fx_rates_GBP_2011-01-15_2011-01-17_20260611_143022.json
     filename = (
