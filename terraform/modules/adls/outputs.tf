@@ -1,4 +1,4 @@
-# ── Storage account ───────────────────────────────────────────────────────────
+# Storage account
 
 output "storage_account_name" {
   description = "Name of the storage account, used by ADF and Databricks to connect to ADLS."
@@ -10,7 +10,7 @@ output "storage_account_id" {
   value       = azurerm_storage_account.main.id
 }
 
-# ── Data lake zones ───────────────────────────────────────────────────────────
+# Data lake zones
 
 output "raw_filesystem_name" {
   description = "Raw zone."

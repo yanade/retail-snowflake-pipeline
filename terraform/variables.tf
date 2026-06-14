@@ -1,4 +1,4 @@
-# ── Project identity ──────────────────────────────────────────────────────────
+# Project identity
 
 variable "project_name" {
   description = "Short prefix applied to every resource name."
@@ -23,7 +23,7 @@ variable "location" {
   default     = "uksouth"
 }
 
-# ── Snowflake connection ──────────────────────────────────────────────────────
+# Snowflake connection
 
 variable "snowflake_account" {
   description = "Snowflake account identifier."
@@ -41,7 +41,20 @@ variable "snowflake_password" {
   sensitive   = true
 }
 
-# ── Tags ─────────────────────────────────────────────────────────────────────
+# Alerts
+
+variable "alert_email" {
+  description = "Email address that receives pipeline failure alerts."
+  type        = string
+}
+
+variable "slack_webhook_url" {
+  description = "Slack incoming webhook URL for pipeline failure alerts."
+  type        = string
+  sensitive   = true
+}
+
+# Tags
 
 variable "tags" {
   description = "Tags applied to every Azure resource. Used for cost tracking and filtering in the portal."

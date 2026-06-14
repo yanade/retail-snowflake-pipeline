@@ -1,4 +1,4 @@
-# ── ADLS module inputs ────────────────────────────────────────────────────────
+# ADLS module inputs
 
 variable "project_name" {
   description = "Short prefix used to build the storage account name."
