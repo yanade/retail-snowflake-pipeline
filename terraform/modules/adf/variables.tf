@@ -1,0 +1,31 @@
+# ADF module inputs
+
+variable "project_name" {
+  description = "Short prefix used to build the ADF instance name."
+  type        = string
+}
+
+variable "environment" {
+  description = "Deployment environment — appended to resource names to separate dev and prod."
+  type        = string
+}
+
+variable "location" {
+  description = "Azure region where ADF will be created."
+  type        = string
+}
+
+variable "resource_group_name" {
+  description = "Name of the Azure resource group ADF belongs to."
+  type        = string
+}
+
+variable "storage_account_name" {
+  description = "Name of the ADLS storage account ADF will read from and write to."
+  type        = string
+}
+
+variable "tags" {
+  description = "Tags applied to the ADF instance."
+  type        = map(string)
+}
