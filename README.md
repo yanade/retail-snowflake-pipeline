@@ -194,6 +194,27 @@ cp .env.example .env
 ```
 
 ### Infrastructure
+
+Before running Terraform for the first time, create the remote state storage manually:
+
+```bash
+az group create \
+  --name retail-pipeline-tfstate-rg \
+  --location uksouth
+
+az storage account create \
+  --name retailpipelinetfstate \
+  --resource-group retail-pipeline-tfstate-rg \
+  --location uksouth \
+  --sku Standard_LRS
+
+az storage container create \
+  --name tfstate \
+  --account-name retailpipelinetfstate
+```
+
+Then provision all infrastructure:
+
 ```bash
 cd terraform
 terraform init
