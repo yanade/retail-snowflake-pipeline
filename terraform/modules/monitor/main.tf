@@ -17,39 +17,19 @@ resource "azurerm_monitor_diagnostic_setting" "adf" {
   target_resource_id         = var.adf_id
   log_analytics_workspace_id = azurerm_log_analytics_workspace.main.id
 
-  logs {
+  enabled_log {
     category = "PipelineRuns"
-    enabled  = true
   }
 
-  logs {
+  enabled_log {
     category = "ActivityRuns"
-    enabled  = true
   }
 
-  metrics {
+  enabled_metric {
     category = "AllMetrics"
-    enabled  = true
   }
 }
 
-# Send Databricks logs to Log Analytics
-
-resource "azurerm_monitor_diagnostic_setting" "databricks" {
-  name                       = "databricks-diagnostics"
-  target_resource_id         = var.databricks_id
-  log_analytics_workspace_id = azurerm_log_analytics_workspace.main.id
-
-  logs {
-    category = "WorkspaceAudit"
-    enabled  = true
-  }
-
-  metrics {
-    category = "AllMetrics"
-    enabled  = true
-  }
-}
 
 # Action group: who gets notified
 
@@ -61,11 +41,6 @@ resource "azurerm_monitor_action_group" "email" {
   email_receiver {
     name          = "pipeline-failure"
     email_address = var.alert_email
-  }
-
-  webhook_receiver {
-    name        = "slack-pipeline-failure"
-    service_uri = var.slack_webhook_url  # Slack incoming webhook URL
   }
 }
 

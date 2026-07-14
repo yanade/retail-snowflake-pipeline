@@ -25,21 +25,11 @@ variable "alert_email" {
   type        = string
 }
 
-variable "slack_webhook_url" {
-  description = "Slack incoming webhook URL for pipeline failure alerts."
-  type        = string
-  sensitive   = true
-}
-
 variable "adf_id" {
   description = "Azure resource ID of ADF: used to connect diagnostic logs to Log Analytics."
   type        = string
 }
 
-variable "databricks_id" {
-  description = "Azure resource ID of Databricks: used to connect diagnostic logs to Log Analytics."
-  type        = string
-}
 
 variable "tags" {
   description = "Tags applied to all monitor resources."
