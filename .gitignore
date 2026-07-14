@@ -18,3 +18,7 @@ build/
 # generated output files
 ingestion/api_ingest/output/
 data/
+
+# Terraform
+terraform/.terraform/
+*.tfvars
