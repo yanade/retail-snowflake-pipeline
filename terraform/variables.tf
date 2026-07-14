@@ -48,11 +48,6 @@ variable "alert_email" {
   type        = string
 }
 
-variable "slack_webhook_url" {
-  description = "Slack incoming webhook URL for pipeline failure alerts."
-  type        = string
-  sensitive   = true
-}
 
 # Tags
 

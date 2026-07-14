@@ -4,7 +4,7 @@ terraform {
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
-      version = "~> 3.0"
+      version = "~> 4.0"
     }
   }
 }
@@ -35,25 +35,25 @@ module "adls" {
 # Azure Data Factory: ingestion orchestrator
 
 module "adf" {
-  source               = "./modules/adf"
-  project_name         = var.project_name
-  environment          = var.environment
-  location             = var.location
-  resource_group_name  = azurerm_resource_group.main.name
-  storage_account_name = module.adls.storage_account_name
-  tags                 = var.tags
+  source                           = "./modules/adf"
+  project_name                     = var.project_name
+  environment                      = var.environment
+  location                         = var.location
+  resource_group_name              = azurerm_resource_group.main.name
+  storage_account_connection_string = module.adls.storage_account_primary_connection_string
+  tags                             = var.tags
 }
 
 # Databricks — PySpark transformation workspace
 
 module "databricks" {
-  source               = "./modules/databricks"
-  project_name         = var.project_name
-  environment          = var.environment
-  location             = var.location
-  resource_group_name  = azurerm_resource_group.main.name
-  storage_account_name = module.adls.storage_account_name
-  tags                 = var.tags
+  source              = "./modules/databricks"
+  project_name        = var.project_name
+  environment         = var.environment
+  location            = var.location
+  resource_group_name = azurerm_resource_group.main.name
+  storage_account_id  = module.adls.storage_account_id
+  tags                = var.tags
 }
 
 # Azure Monitor — Log Analytics and pipeline failure alerts
@@ -65,8 +65,6 @@ module "monitor" {
   location            = var.location
   resource_group_name = azurerm_resource_group.main.name
   alert_email         = var.alert_email
-  slack_webhook_url   = var.slack_webhook_url
   adf_id              = module.adf.data_factory_id
-  databricks_id       = module.databricks.workspace_id
   tags                = var.tags
 }
