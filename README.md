@@ -126,6 +126,22 @@ GBP transaction values are enriched with daily exchange rates from
 [freecurrencyapi.com](https://freecurrencyapi.com) — free tier supports
 historical data back to 2010, enabling multi-currency reporting in the star schema.
 
+**Databricks vs dbt — separation of responsibilities**
+Databricks and dbt each own a distinct layer — they are not interchangeable:
+
+| | Databricks | dbt |
+|---|---|---|
+| Responsibility | Data preparation | Dimensional modelling |
+| Input | Raw flat CSV from ADLS | Clean flat Parquet from served zone |
+| Output | Clean enriched flat Parquet | Star schema tables in Snowflake |
+| Language | PySpark | SQL |
+| Tests | Unit tests on transformation logic | Data quality tests on the model |
+
+Databricks cleans, enriches with FX rates, and routes bad records to dead-letter —
+but outputs a **flat enriched file**, not a star schema.
+dbt reads that flat file and builds `dim_customer`, `dim_product`, `dim_date`,
+and `fact_sales`. The star schema lives entirely in dbt/Snowflake.
+
 ---
 
 ## Star Schema
@@ -163,7 +179,7 @@ retail-snowflake-pipeline/
 - [x] Project architecture designed
 - [x] FX rates ingestion script — freecurrencyapi.com (`ingestion/api_ingest/`)
 - [x] Unit tests — 15 tests passing (`tests/ingestion/api_ingest/`)
-- [ ] Terraform — Azure infrastructure
+- [x] Terraform — Azure infrastructure
 - [ ] ADLS Gen2 — 3-zone storage with date partitioning
 - [ ] ADF — watermark-based incremental pipeline
 - [ ] Databricks — PySpark incremental transformation
