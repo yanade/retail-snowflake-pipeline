@@ -20,9 +20,10 @@ variable "resource_group_name" {
   type        = string
 }
 
-variable "storage_account_name" {
-  description = "Name of the ADLS storage account ADF will read from and write to."
+variable "storage_account_connection_string" {
+  description = "Primary connection string of the ADLS storage account."
   type        = string
+  sensitive   = true
 }
 
 variable "tags" {
