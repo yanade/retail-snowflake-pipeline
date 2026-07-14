@@ -20,15 +20,15 @@ variable "resource_group_name" {
   type        = string
 }
 
-variable "storage_account_name" {
-  description = "Name of the ADLS storage account Databricks will mount and read from."
+variable "storage_account_id" {
+  description = "Azure resource ID of the ADLS storage account — used for role assignment."
   type        = string
 }
 
 variable "sku" {
-  description = "Databricks pricing tier. Use 'standard' for dev, 'premium' for production."
+  description = "Databricks pricing tier. Azure retired the 'standard' SKU, so 'premium' is required for all environments now."
   type        = string
-  default     = "standard"
+  default     = "premium"
 }
 
 variable "tags" {

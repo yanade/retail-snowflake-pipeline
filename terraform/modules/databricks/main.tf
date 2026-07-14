@@ -11,16 +11,24 @@ resource "azurerm_databricks_workspace" "main" {
   tags = var.tags
 }
 
-# Look up the existing ADLS storage account
-data "azurerm_storage_account" "adls" {
-  name                = var.storage_account_name
+# Access Connector: purpose-built identity for Databricks to access external storage
+
+resource "azurerm_databricks_access_connector" "adls" {
+  name                = "${var.project_name}-${var.environment}-dbx-connector"
   resource_group_name = var.resource_group_name
+  location            = var.location
+
+  identity {
+    type = "SystemAssigned"  # Azure creates and manages this identity automatically
+  }
+
+  tags = var.tags
 }
 
-# Grant Databricks permission to read and write ADLS
+# Grant the Access Connector identity permission to read and write ADLS
 
 resource "azurerm_role_assignment" "databricks_adls" {
-  scope                = data.azurerm_storage_account.adls.id
-  role_definition_name = "Storage Blob Data Contributor"  # allows read, write, delete on blobs
-  principal_id         = azurerm_databricks_workspace.main.storage_account_identity[0].principal_id
+  scope                = var.storage_account_id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = azurerm_databricks_access_connector.adls.identity[0].principal_id
 }
