@@ -10,6 +10,12 @@ output "storage_account_id" {
   value       = azurerm_storage_account.main.id
 }
 
+output "storage_account_primary_connection_string" {
+  description = "Primary connection string — passed to ADF linked service."
+  value       = azurerm_storage_account.main.primary_connection_string
+  sensitive   = true
+}
+
 # Data lake zones
 
 output "raw_filesystem_name" {

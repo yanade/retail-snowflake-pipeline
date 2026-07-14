@@ -1,7 +1,7 @@
 # ── Storage account ───────────────────────────────────────────────────────────
 
 resource "azurerm_storage_account" "main" {
-  # Azure requires: lowercase, no hyphens, max 24 characters, globally unique
+  # Azure requires: lowercase, no hyphens, globally unique
   name                = lower(replace("${var.project_name}${var.environment}", "-", ""))
   resource_group_name = var.resource_group_name
   location            = var.location
