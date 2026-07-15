@@ -26,6 +26,11 @@ variable "storage_account_connection_string" {
   sensitive   = true
 }
 
+variable "key_vault_id" {
+  description = "Azure resource ID of Key Vault — used to create the Key Vault Linked Service in ADF."
+  type        = string
+}
+
 variable "tags" {
   description = "Tags applied to the ADF instance."
   type        = map(string)
