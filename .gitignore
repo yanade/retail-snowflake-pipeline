@@ -22,3 +22,6 @@ data/
 # Terraform
 terraform/.terraform/
 *.tfvars
+
+# Local session scripts — contain secrets, never commit
+session.sh
