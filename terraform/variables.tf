@@ -23,6 +23,12 @@ variable "location" {
   default     = "uksouth"
 }
 
+variable "sql_location" {
+  description = "Azure region for SQL Server. Differs from main location due to free trial subscription restriction in uksouth. In production all services would be co-located."
+  type        = string
+  default     = "francecentral"
+}
+
 # Snowflake connection
 
 variable "snowflake_account" {
@@ -37,6 +43,14 @@ variable "snowflake_user" {
 
 variable "snowflake_password" {
   description = "Snowflake password. Marked sensitive: never printed in logs or terminal output."
+  type        = string
+  sensitive   = true
+}
+
+# SQL Database
+
+variable "sql_admin_password" {
+  description = "Administrator password for Azure SQL Server — passed to Key Vault at bootstrap time. Never stored in state after secrets are migrated to CLI-managed bootstrap."
   type        = string
   sensitive   = true
 }
