@@ -52,3 +52,11 @@ output "log_analytics_workspace_name" {
   description = "Name of the Log Analytics Workspace: used for querying pipeline logs."
   value       = module.monitor.log_analytics_workspace_name
 }
+
+# Azure SQL
+
+output "sql_server_fqdn" {
+  description = "Fully qualified domain name of the SQL Server: used in bootstrap scripts."
+  value       = module.sql.sql_server_fqdn
+}
+
