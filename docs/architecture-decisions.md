@@ -25,6 +25,16 @@ Azure SQL Database provides native ADF integration (Lookup + Stored Procedure ac
 - One additional ADF Linked Service (`ls_azure_sql`)
 - Watermark survives pipeline failures — no duplicate or missing data if a run is interrupted
 
+### Limitations
+- The watermark column is `InvoiceDate` — a source-assigned timestamp from the UCI dataset.
+- In a production system with a live source, a server-assigned `created_at` or `updated_at` column would be used instead. Source-assigned timestamps cannot reliably capture late-arriving records because the source system controls the value.
+- This limitation exists because the UCI dataset is historical CSV data with no ingestion timestamp.
+- Late-arriving records are partially mitigated by a configurable `lookback_days` window stored in `pipeline_config`. The ADF source query re-queries the last N days on every run to catch records that arrived after their window was processed.
+- Deduplication of overlapping records from the lookback window is handled in Databricks, not in ADF or the watermark table.
+
+### Coupling constraint
+Advancing the watermark to `@window_end` is only safe because the ADF source query applies a configurable lookback window (`pipeline_config.lookback_days`) on every run. If the lookback window is removed, late-arriving records in already-processed windows will be permanently skipped. These two design decisions are coupled and must always be changed together.
+
 ---
 
 ## ADR-002: Secret Management
