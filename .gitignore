@@ -25,3 +25,6 @@ terraform/.terraform/
 
 # Local session scripts — contain secrets, never commit
 session.sh
+
+# Generated docs — not part of source
+docs/adls_upload_case_study.html
