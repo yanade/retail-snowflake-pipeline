@@ -141,3 +141,27 @@ The fix is minimal: a dedicated `sql_location` variable defaults to `francecentr
 - SQL Server is in `francecentral`, all other resources are in `uksouth`
 - Minor cross-region latency between ADF (uksouth) and SQL (francecentral) — negligible for a watermark lookup that runs once per pipeline execution
 - In production all services would be co-located in a single region for latency, data residency, and cost optimisation
+
+---
+
+## ADR-005: ADLS Upload Chunk Size
+
+### Decision
+Set `chunk_size=4 * 1024 * 1024` (4MB) explicitly on all ADLS Gen2 uploads via the Python SDK.
+
+### Reason
+The default chunk size in `azure-storage-file-datalake` is 100MB. Files smaller than 100MB are sent as a single HTTP request body. On a constrained connection, a single 48MB write exceeds the OS socket write timeout, which the SDK has no parameter to control — `timeout` on `upload_data()` is a server-side query parameter, and `read_timeout` on the client covers response waiting only. There is no write timeout in the `requests` library public API; it is enforced at the OS socket layer.
+
+Setting `chunk_size=4MB` splits the file into smaller writes, each completing well within the OS timeout.
+
+### Investigation
+The root cause was identified by eliminating variables in order:
+1. Small file upload succeeded — confirmed size was the only variable
+2. `timeout=300` on `upload_data()` had no effect — confirmed it is a server-side hint
+3. `read_timeout=300` on the client had no effect — confirmed the failure was a write timeout, not a read timeout
+4. SDK source (`_upload_helper.py`) confirmed `chunk_size` defaults to 100MB
+
+### Consequences
+- All upload scripts must set `chunk_size` explicitly — do not rely on the SDK default
+- `max_concurrency=1` is paired with small chunk size on slow connections to avoid parallel writes competing for bandwidth
+- In a production environment with high bandwidth, `chunk_size` and `max_concurrency` should be tuned together
