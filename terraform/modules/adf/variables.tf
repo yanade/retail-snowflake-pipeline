@@ -20,10 +20,9 @@ variable "resource_group_name" {
   type        = string
 }
 
-variable "storage_account_connection_string" {
-  description = "Primary connection string of the ADLS storage account."
+variable "storage_account_name" {
+  description = "Name of the ADLS Gen2 storage account — used to build the DFS endpoint URL."
   type        = string
-  sensitive   = true
 }
 
 variable "key_vault_id" {

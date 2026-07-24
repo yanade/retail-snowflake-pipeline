@@ -72,7 +72,7 @@ module "adf" {
   environment                       = var.environment
   location                          = var.location
   resource_group_name               = azurerm_resource_group.main.name
-  storage_account_connection_string = module.adls.storage_account_primary_connection_string
+  storage_account_name = module.adls.storage_account_name
   key_vault_id                      = module.keyvault.key_vault_id
   tags                              = var.tags
 }
