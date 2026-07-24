@@ -5,9 +5,56 @@ Each ADR records what was decided, what alternatives were considered, and why.
 
 ---
 
-## ADR-001: Watermark Storage
+## ADR-001: Orchestration Strategy
 
+### Decision
+Airflow is the primary workflow orchestrator. Azure Data Factory is responsible
+for Azure-native ingestion and incremental data movement.
 
+### Context
+The pipeline has three distinct concerns: data movement (CSV → ADLS),
+transformation (PySpark), and validation + alerting (DVT, Slack, audit table).
+ADF is optimized for Azure-native data movement but is less suitable for
+Python-centric operational workflows such as DVT execution, custom validation
+logic, and rich notification handling. Airflow can coordinate all three concerns
+through a single DAG while delegating the actual data movement to ADF.
+
+### Architecture
+```
+Airflow DAG  ←  single source of truth for pipeline state
+     │
+     ├── AzureDataFactoryRunPipelineOperator → ADF (ingestion)
+     ├── DatabricksRunNowOperator            → Databricks (transformation)
+     └── PythonOperator                      → DVT, audit table, Slack alert
+```
+
+### Rationale
+Separating workflow orchestration from Azure-native ingestion reduces coupling
+between orchestration logic and cloud-specific data movement services. In this
+pipeline, that boundary is concrete: Airflow owns retries, branching, audit
+logging, and Slack alerts — ADF owns the incremental copy from ADLS and the
+watermark update in Azure SQL.
+
+### Trade-off accepted
+Two systems to monitor and maintain instead of one. When a pipeline fails,
+the investigation crosses two UIs — Airflow for DAG state, ADF Monitor for
+copy activity detail. This cost is acceptable because Airflow is the single
+source of truth for pipeline status — ADF is always invoked from Airflow,
+never independently.
+
+### Consequences
+- Airflow triggers ADF via `AzureDataFactoryRunPipelineOperator`
+- ADF never knows it is part of a larger workflow — it executes when called
+- Either layer can be replaced without rebuilding the other
+
+### When this pattern is appropriate
+This approach is most appropriate when workflow orchestration extends beyond
+Azure-native ingestion and requires Python-based validation, cross-platform
+integrations, or standardized orchestration across heterogeneous environments.
+
+---
+
+## ADR-002: Watermark Storage
 
 ### Decision
 Use Azure SQL Database as the watermark control store.
@@ -37,9 +84,7 @@ Advancing the watermark to `@window_end` is only safe because the ADF source que
 
 ---
 
-## ADR-002: Secret Management
-
-
+## ADR-003: Secret Management
 
 ### Decision
 Use Azure Key Vault for all credentials. Terraform provisions the vault as infrastructure only — secrets are bootstrapped separately via Azure CLI and never enter Terraform state.
@@ -80,9 +125,7 @@ Key Vault access policy is provisioned as a standalone resource in `terraform/ma
 
 ---
 
-## ADR-003: Cost Management — Destroy After Every Session
-
-
+## ADR-004: Cost Management — Destroy After Every Session
 
 ### Decision
 Run `terraform destroy` at the end of every dev session and `terraform apply` at the start of the next. Infrastructure is treated as ephemeral during development.
@@ -120,9 +163,7 @@ terraform destroy
 
 ---
 
-## ADR-004: Regional Deployment Constraint — SQL Server in francecentral
-
-
+## ADR-005: Regional Deployment Constraint — SQL Server in francecentral
 
 ### Decision
 Deploy Azure SQL Server in `francecentral` while all other services remain in `uksouth`.
@@ -144,7 +185,7 @@ The fix is minimal: a dedicated `sql_location` variable defaults to `francecentr
 
 ---
 
-## ADR-005: ADLS Upload Chunk Size
+## ADR-006: ADLS Upload Chunk Size
 
 ### Decision
 Set `chunk_size=4 * 1024 * 1024` (4MB) explicitly on all ADLS Gen2 uploads via the Python SDK.
