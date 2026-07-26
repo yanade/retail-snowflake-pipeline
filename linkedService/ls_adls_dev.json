@@ -1,0 +1,11 @@
+{
+	"name": "ls_adls_dev",
+	"type": "Microsoft.DataFactory/factories/linkedservices",
+	"properties": {
+		"type": "AzureBlobFS",
+		"typeProperties": {
+			"url": "https://retailpipelinedev.dfs.core.windows.net"
+		},
+		"annotations": []
+	}
+}

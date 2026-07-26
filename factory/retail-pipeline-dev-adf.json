@@ -1,0 +1,15 @@
+{
+	"name": "retail-pipeline-dev-adf",
+	"properties": {
+		"trustModeClaimForMi": {
+			"value": "Disabled",
+			"editable": true
+		}
+	},
+	"location": "uksouth",
+	"identity": {
+		"type": "SystemAssigned",
+		"principalId": "9042c442-f772-4b25-bd75-8a03492ef298",
+		"tenantId": "06462240-6064-403e-ab97-6b2903180cd5"
+	}
+}
