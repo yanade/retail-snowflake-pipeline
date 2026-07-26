@@ -1,7 +1,14 @@
-# Architecture Decision Records
+# Architecture Decisions
 
-This file documents key design decisions made during the build of the retail-snowflake-pipeline.
-Each ADR records what was decided, what alternatives were considered, and why.
+This document records the key architectural decisions made during the project.
+
+The objective is not to document every implementation detail, but to explain
+why specific technologies and design patterns were chosen, what alternatives
+were considered, and what trade-offs were accepted.
+
+The decisions reflect the project's primary goal: building a realistic,
+interview-ready Azure Data Engineering portfolio while keeping the scope
+appropriate for a Junior/Mid-level Data Engineer.
 
 ---
 
@@ -74,9 +81,8 @@ Azure SQL Database provides native ADF integration (Lookup + Stored Procedure ac
 
 ### Limitations
 - The watermark column is `InvoiceDate` — a source-assigned timestamp from the UCI dataset.
-- In a production system with a live source, a server-assigned `created_at` or `updated_at` column would be used instead. Source-assigned timestamps cannot reliably capture late-arriving records because the source system controls the value.
-- This limitation exists because the UCI dataset is historical CSV data with no ingestion timestamp.
-- Late-arriving records are partially mitigated by a configurable `lookback_days` window stored in `pipeline_config`. The ADF source query re-queries the last N days on every run to catch records that arrived after their window was processed.
+- In a production system with a live source, a server-assigned `created_at` or `updated_at` column would be used instead.
+- Late-arriving records are partially mitigated by a configurable `lookback_days` window stored in `pipeline_config`.
 - Deduplication of overlapping records from the lookback window is handled in Databricks, not in ADF or the watermark table.
 
 ### Coupling constraint
@@ -90,35 +96,19 @@ Advancing the watermark to `@window_end` is only safe because the ADF source que
 Use Azure Key Vault for all credentials. Terraform provisions the vault as infrastructure only — secrets are bootstrapped separately via Azure CLI and never enter Terraform state.
 
 ### Alternatives Considered
-- **Terraform manages secrets** — simple, one command deploys everything, but secret values are stored in Terraform state in plain text; anyone with state file access can read credentials
+- **Terraform manages secrets** — simple, one command deploys everything, but secret values are stored in Terraform state in plain text
 - **Plain text in connection string** — password embedded in ADF config; visible in ADF UI and logs
 - **Environment variables** — secrets appear in CI logs; not suitable for production
 
 ### Reason
 Secrets and infrastructure have different lifecycles. A Key Vault exists for years and is managed by the platform team. A secret is rotated every 90 days and is managed by the security team. Mixing them in the same Terraform apply couples two concerns that change at different rates and for different reasons.
 
-Keeping secrets outside Terraform means:
-- Secret values never appear in `terraform.tfstate`
-- Password rotation requires no Terraform run — only an Azure CLI command
-- The pattern matches enterprise practice where a dedicated secrets pipeline or security team manages credentials independently of infrastructure provisioning
-
-### Implementation
-Terraform provisions the Key Vault (empty). After `terraform apply`, secrets are bootstrapped once via Azure CLI:
-```bash
-az keyvault secret set \
-  --vault-name retail-pipeline-dev-kv \
-  --name sql-admin-password \
-  --value "YourPassword123!"
-```
-ADF reads the secret at runtime via its Managed Identity. No password is stored in ADF configuration.
+Keeping secrets outside Terraform means secret values never appear in `terraform.tfstate`, password rotation requires no Terraform run, and the pattern matches enterprise practice where a dedicated secrets pipeline manages credentials independently of infrastructure provisioning.
 
 ### Consequences
-- One additional Terraform module (`modules/keyvault/`) — vault only, no secrets
-- One additional ADF Linked Service (`ls_key_vault`)
-- ADF Managed Identity granted `Get` permission on Key Vault secrets via standalone access policy in `main.tf`
+- ADF Managed Identity granted `Get` and `List` permissions on Key Vault secrets
 - Secret bootstrap is a manual step documented in README
-- Password rotation: update SQL first, then update Key Vault secret via CLI — ADF picks up new value automatically on next run, no redeployment needed
-- Production upgrade path: Key Vault rotation policy + Azure Function for automated rotation, or passwordless Managed Identity authentication between ADF and SQL
+- Password rotation: update SQL first, then update Key Vault secret via CLI — ADF picks up the new value automatically on next run
 
 ### Dependency design
 Key Vault access policy is provisioned as a standalone resource in `terraform/main.tf` — not inside any module. This breaks the circular dependency between `module.adf` (needs `key_vault_id`) and `module.keyvault` (needs `adf_principal_id`). Cross-module wiring belongs at the root level.
@@ -137,28 +127,9 @@ Run `terraform destroy` at the end of every dev session and `terraform apply` at
 ### Reason
 The project uses cost-sensitive services (Databricks Premium SKU, Azure SQL serverless). Destroying after each session eliminates all standing charges. Remote Terraform state in Azure Storage persists between sessions so the full stack can be recreated reliably with a single command.
 
-### Implementation
-A local `session.sh` file (gitignored, never committed) stores environment variables and serves as the session entry point:
-
-```bash
-# Start of session
-source session.sh
-cd terraform && terraform apply
-
-# Bootstrap secret after every fresh apply
-az keyvault secret set \
-  --vault-name retail-pipeline-dev-kv \
-  --name sql-admin-password \
-  --value "$TF_VAR_sql_admin_password"
-
-# End of session
-terraform destroy
-```
-
 ### Consequences
 - Secret bootstrap is required after every `terraform apply` — not just the first deployment
-- `session.sh` must never be committed — contains credentials as environment variables
-- Full redeploy takes ~10 minutes per session (Databricks workspace provisioning is the slowest resource)
+- Full redeploy takes approximately 10 minutes per session (Databricks workspace provisioning is the slowest resource)
 - In production this pattern would not be used — infrastructure is persistent and secrets are managed by a dedicated rotation pipeline
 
 ---
@@ -174,12 +145,11 @@ Deploy Azure SQL Server in `francecentral` while all other services remain in `u
 - **Replace Azure SQL with a different service** — would change the watermark architecture without addressing the root cause
 
 ### Reason
-The free trial subscription (`Azure subscription 1`) blocks SQL Server provisioning in `uksouth` with error `ProvisioningDisabled`. Investigation confirmed `francecentral` allows Basic tier SQL on this subscription. This is a deployment constraint specific to the free trial, not an architectural choice.
+The free trial subscription blocks SQL Server provisioning in `uksouth` with error `ProvisioningDisabled`. Investigation confirmed `francecentral` allows Basic tier SQL on this subscription. This is a deployment constraint specific to the free trial, not an architectural choice.
 
 The fix is minimal: a dedicated `sql_location` variable defaults to `francecentral` and is passed only to `module.sql`. All other modules continue to use `var.location = "uksouth"`.
 
 ### Consequences
-- SQL Server is in `francecentral`, all other resources are in `uksouth`
 - Minor cross-region latency between ADF (uksouth) and SQL (francecentral) — negligible for a watermark lookup that runs once per pipeline execution
 - In production all services would be co-located in a single region for latency, data residency, and cost optimisation
 
@@ -191,7 +161,7 @@ The fix is minimal: a dedicated `sql_location` variable defaults to `francecentr
 Set `chunk_size=4 * 1024 * 1024` (4MB) explicitly on all ADLS Gen2 uploads via the Python SDK.
 
 ### Reason
-The default chunk size in `azure-storage-file-datalake` is 100MB. Files smaller than 100MB are sent as a single HTTP request body. On a constrained connection, a single 48MB write exceeds the OS socket write timeout, which the SDK has no parameter to control — `timeout` on `upload_data()` is a server-side query parameter, and `read_timeout` on the client covers response waiting only. There is no write timeout in the `requests` library public API; it is enforced at the OS socket layer.
+The default chunk size in `azure-storage-file-datalake` is 100MB. Files smaller than 100MB are sent as a single HTTP request body. On a constrained connection, a single 48MB write exceeds the OS socket write timeout, which the SDK has no parameter to control — `timeout` on `upload_data()` is a server-side query parameter, and `read_timeout` on the client covers response waiting only.
 
 Setting `chunk_size=4MB` splits the file into smaller writes, each completing well within the OS timeout.
 
@@ -205,4 +175,74 @@ The root cause was identified by eliminating variables in order:
 ### Consequences
 - All upload scripts must set `chunk_size` explicitly — do not rely on the SDK default
 - `max_concurrency=1` is paired with small chunk size on slow connections to avoid parallel writes competing for bandwidth
-- In a production environment with high bandwidth, `chunk_size` and `max_concurrency` should be tuned together
+
+---
+
+## ADR-007: Selecting an Incremental Ingestion Strategy for a Static File Source
+
+### Status
+
+Accepted
+
+### Context
+
+The project uses the UCI Online Retail dataset, which is provided as a single
+historical CSV file rather than a live operational source.
+
+The goal is to demonstrate an end-to-end Azure Data Engineering platform
+(Terraform, ADF, Databricks, Snowflake and dbt) while keeping the project
+appropriate for a Junior/Mid-level portfolio.
+
+Several ingestion patterns were evaluated before implementation.
+
+### Decision
+
+ADF copies the complete source CSV into ADLS.
+
+Databricks applies incremental processing using the watermark stored in Azure
+SQL (`InvoiceDate > last_watermark`).
+
+ADF is responsible for orchestration, while Databricks is responsible for data
+processing.
+
+### Alternatives Considered
+
+**Option 1 — Full file copy with Databricks watermark (Accepted)**
+Simple implementation with the lowest complexity.
+Watermark filtering is performed during transformation.
+
+**Option 2 — Daily file ingestion**
+Cleaner file-based incremental pattern.
+Rejected due to additional preprocessing of the historical dataset.
+
+**Option 3 — Azure SQL source**
+Implements Microsoft's recommended watermark pattern.
+Rejected because it introduces an artificial operational source.
+
+**Option 4 — Event-driven ingestion**
+Suitable for production event-driven systems.
+Rejected because demonstrating watermark-based processing was a primary project objective.
+
+### Rationale
+
+The selected approach was considered the best balance between implementation
+effort, learning value and overall portfolio scope. It allows the project to
+focus on the complete Azure platform rather than optimising a single ingestion
+component.
+
+### Consequences
+
+- Incremental filtering is performed in Databricks rather than ADF.
+- ADF demonstrates orchestration using Lookup, Copy and Stored Procedure activities.
+- The ingestion layer is intentionally simplified.
+- The downstream architecture (Databricks, Snowflake and dbt) is independent of the ingestion strategy.
+
+### Production Considerations
+
+For production systems, a different ingestion pattern would normally be used:
+
+- query-based watermark extraction for database sources;
+- file-based incremental ingestion for daily file drops.
+
+The current implementation is an intentional trade-off made for the objectives
+of this portfolio project.
