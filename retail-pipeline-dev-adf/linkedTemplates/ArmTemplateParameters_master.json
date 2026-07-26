@@ -1,0 +1,30 @@
+{
+	"$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+	"contentVersion": "1.0.0.0",
+	"parameters": {
+		"factoryName": {
+			"value": "retail-pipeline-dev-adf"
+		},
+		"ls_adls_dev_properties_typeProperties_url": {
+			"value": "https://retailpipelinedev.dfs.core.windows.net"
+		},
+		"ls_key_vault_properties_typeProperties_baseUrl": {
+			"value": "https://retail-pipeline-dev-kv.vault.azure.net/"
+		},
+		"ls_azure_sql_properties_typeProperties_server": {
+			"value": "retail-pipeline-dev-sql.database.windows.net"
+		},
+		"ls_azure_sql_properties_typeProperties_database": {
+			"value": "watermark-db"
+		},
+		"ls_azure_sql_properties_typeProperties_userName": {
+			"value": "sqladmin"
+		},
+		"containerUri": {
+			"value": ""
+		},
+		"containerSasToken": {
+			"value": ""
+		}
+	}
+}
