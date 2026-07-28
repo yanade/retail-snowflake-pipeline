@@ -1,10 +1,10 @@
 # Databricks workspace
 
 resource "azurerm_databricks_workspace" "main" {
-  name                        = "${var.project_name}-${var.environment}-dbx"
-  location                    = var.location
-  resource_group_name         = var.resource_group_name
-  sku                         = var.sku
+  name                = "${var.project_name}-${var.environment}-dbx"
+  location            = var.location
+  resource_group_name = var.resource_group_name
+  sku                 = var.sku
   # Databricks creates its own internal resource group for VMs and networking
   managed_resource_group_name = "${var.project_name}-${var.environment}-dbx-managed"
 
@@ -19,7 +19,7 @@ resource "azurerm_databricks_access_connector" "adls" {
   location            = var.location
 
   identity {
-    type = "SystemAssigned"  # Azure creates and manages this identity automatically
+    type = "SystemAssigned" # Azure creates and manages this identity automatically
   }
 
   tags = var.tags

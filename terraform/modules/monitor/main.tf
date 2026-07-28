@@ -4,8 +4,8 @@ resource "azurerm_log_analytics_workspace" "main" {
   name                = "${var.project_name}-${var.environment}-logs"
   location            = var.location
   resource_group_name = var.resource_group_name
-  sku                 = "PerGB2018"  # standard pricing tier: pay per GB ingested
-  retention_in_days   = 30           # keep logs for 30 days, free tier limit
+  sku                 = "PerGB2018" # standard pricing tier: pay per GB ingested
+  retention_in_days   = 30          # keep logs for 30 days, free tier limit
 
   tags = var.tags
 }
@@ -52,7 +52,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert" "adf_failure" {
   resource_group_name = var.resource_group_name
 
   data_source_id = azurerm_log_analytics_workspace.main.id
-  query = <<-QUERY
+  query          = <<-QUERY
     AzureDiagnostics
     | where ResourceType == "FACTORIES/PIPELINERUNS"
     | where status_s == "Failed"

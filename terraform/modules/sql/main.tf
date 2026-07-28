@@ -27,7 +27,7 @@ resource "azurerm_mssql_firewall_rule" "allow_azure_services" {
 resource "azurerm_mssql_database" "watermark" {
   name      = "watermark-db"
   server_id = azurerm_mssql_server.main.id
-  sku_name  = "GP_S_Gen5_1"   # General Purpose Serverless, Gen5, 1 vCore
+  sku_name  = "GP_S_Gen5_1" # General Purpose Serverless, Gen5, 1 vCore
   collation = "SQL_Latin1_General_CP1_CI_AS"
 
   # Serverless-specific settings

@@ -12,8 +12,8 @@ resource "azurerm_key_vault" "main" {
   resource_group_name        = var.resource_group_name
   tenant_id                  = data.azurerm_client_config.current.tenant_id
   sku_name                   = "standard"
-  purge_protection_enabled   = false  # allows destroy/recreate in dev
-  soft_delete_retention_days = 7      # minimum retention, keeps dev cycle fast
+  purge_protection_enabled   = false # allows destroy/recreate in dev
+  soft_delete_retention_days = 7     # minimum retention, keeps dev cycle fast
 
   tags = var.tags
 }

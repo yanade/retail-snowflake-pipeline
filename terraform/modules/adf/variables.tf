@@ -11,7 +11,7 @@ variable "environment" {
 }
 
 variable "location" {
-  description = "Azure region where ADF will be created."
+  description = "Azure region."
   type        = string
 }
 
@@ -21,12 +21,12 @@ variable "resource_group_name" {
 }
 
 variable "storage_account_name" {
-  description = "Name of the ADLS Gen2 storage account — used to build the DFS endpoint URL."
+  description = "Name of the ADLS Gen2 storage account: used to build the DFS endpoint URL."
   type        = string
 }
 
 variable "key_vault_id" {
-  description = "Azure resource ID of Key Vault — used to create the Key Vault Linked Service in ADF."
+  description = "Azure resource ID of Key Vault."
   type        = string
 }
 

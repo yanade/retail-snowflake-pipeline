@@ -3,8 +3,8 @@
 # Run once after terraform apply and bootstrap_keyvault.sh.
 #
 # Prerequisites:
-#   source session.sh   — sets TF_VAR_sql_admin_password
-#   sqlcmd installed    — brew install sqlcmd
+#   source session.sh: sets TF_VAR_sql_admin_password
+#   sqlcmd installed: brew install sqlcmd
 
 set -e  # exit immediately if any command fails
 
