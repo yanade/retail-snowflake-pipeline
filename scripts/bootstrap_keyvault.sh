@@ -3,7 +3,7 @@
 # Run this once per session before starting ADF pipelines.
 #
 # Prerequisites:
-#   source session.sh   — sets TF_VAR_sql_admin_password
+#   source session.sh: sets TF_VAR_sql_admin_password, TF_VAR_postgres_admin_password
 
 set -e  # exit immediately if any command fails
 
@@ -14,4 +14,9 @@ az keyvault secret set \
   --name sql-admin-password \
   --value "$TF_VAR_sql_admin_password"
 
-echo "Done. sql-admin-password is set in Key Vault."
+az keyvault secret set \
+  --vault-name retail-pipeline-dev-kv \
+  --name postgres-admin-password \
+  --value "$TF_VAR_postgres_admin_password"
+
+echo "Done. sql-admin-password and postgres-admin-password are set in Key Vault."
