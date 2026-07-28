@@ -1,15 +1,5 @@
--- Watermark Control Tables
--- Database: watermark-db (Azure SQL, francecentral)
+-- Watermark control tables. Source: PostgreSQL retail_oltp (database/schema.sql).
 -- Run once after terraform apply and secret bootstrap.
-
--- LIMITATION: This pipeline uses InvoiceDate as the watermark column because
--- the UCI dataset is historical CSV data with no ingestion timestamp.
--- In a production system, a server-assigned created_at column would be used
--- to capture late-arriving records reliably.
-
--- ── Table 1: pipeline_watermark_control ──────────────────────
--- Stores the last successfully processed timestamp for each pipeline.
--- ADF reads this at the start of every run to know where to continue from.
 
 CREATE TABLE pipeline_watermark_control (
     pipeline_name   NVARCHAR(100)  NOT NULL,
@@ -21,15 +11,9 @@ CREATE TABLE pipeline_watermark_control (
 );
 GO
 
--- ── Table 2: pipeline_config ──────────────────────────────────
--- Stores configuration for each pipeline, managed manually by the ops team.
--- ADF reads this at the start of every run alongside the watermark.
-
 CREATE TABLE pipeline_config (
     pipeline_name       NVARCHAR(100)  NOT NULL,
-    -- Source type drives ADF pipeline branching — different connectors for different sources.
-    source_type         NVARCHAR(50)   NOT NULL,  -- CSV | SQL | PostgreSQL | API
-    -- Source column used as the watermark — allows different pipelines to use different columns.
+    source_type         NVARCHAR(50)   NOT NULL,
     watermark_column    NVARCHAR(100)  NOT NULL,
     lookback_days       INT            NOT NULL,
     window_size_hours   INT            NOT NULL DEFAULT 24,
@@ -40,16 +24,8 @@ CREATE TABLE pipeline_config (
 );
 GO
 
--- ── Stored Procedure ─────────────────────────────────────────
--- Called by ADF after each successful copy to advance the watermark.
--- Advances to @window_end rather than MAX(InvoiceDate) so sparse windows
--- do not cause the next run to overlap incorrectly.
---
--- COUPLING: Advancing to @window_end is only safe because the ADF source
--- query applies a lookback window (pipeline_config.lookback_days) on every run.
--- If the lookback window is removed, late-arriving records in already-processed
--- windows will be permanently skipped.
--- These two design decisions must always be changed together.
+-- COUPLING: advancing to @window_end is only safe because of the lookback
+-- window below. Removing one without the other silently drops late updates.
 
 CREATE PROCEDURE usp_update_watermark
     @pipeline_name  NVARCHAR(100),
@@ -71,24 +47,44 @@ BEGIN
 END;
 GO
 
--- ── Seed Data: State ──────────────────────────────────────────
--- Sets the starting watermark to one second before the first UCI invoice.
--- The first pipeline run loads all records with InvoiceDate > this value.
+-- Sentinel low-water mark — updated_at is wall-clock time, not a business date.
 
 INSERT INTO pipeline_watermark_control (pipeline_name, last_watermark, rows_loaded, updated_at)
 VALUES
-    ('uci_retail_sales', '2010-11-30 23:59:59', NULL, SYSUTCDATETIME()),
-    ('fx_rates',         '2010-11-30 23:59:59', NULL, SYSUTCDATETIME());
+    ('customers',          '1900-01-01', NULL, SYSUTCDATETIME()),
+    ('customer_addresses', '1900-01-01', NULL, SYSUTCDATETIME()),
+    ('product_categories', '1900-01-01', NULL, SYSUTCDATETIME()),
+    ('suppliers',          '1900-01-01', NULL, SYSUTCDATETIME()),
+    ('products',           '1900-01-01', NULL, SYSUTCDATETIME()),
+    ('currencies',         '1900-01-01', NULL, SYSUTCDATETIME()),
+    ('stores',             '1900-01-01', NULL, SYSUTCDATETIME()),
+    ('employees',          '1900-01-01', NULL, SYSUTCDATETIME()),
+    ('orders',             '1900-01-01', NULL, SYSUTCDATETIME()),
+    ('order_items',        '1900-01-01', NULL, SYSUTCDATETIME()),
+    ('payments',           '1900-01-01', NULL, SYSUTCDATETIME()),
+    ('exchange_rates',     '1900-01-01', NULL, SYSUTCDATETIME());
 GO
 
--- ── Seed Data: Config ─────────────────────────────────────────
--- Sets lookback_days = 0 for fx_rates because FX rates do not arrive late.
--- customers row is inactive (is_active = 0) — shows the framework supports
--- future database sources without any schema changes.
+-- Phase 1 slice: customers + products (master data feeding dim_customer/dim_product)
+-- plus orders/order_items/payments/exchange_rates (transactional + FX). Enough to
+-- build a complete fact_sales + dims end to end without all 12 pipelines up front.
+-- Remaining tables seeded but inactive — same pattern scales to them later.
+--
+-- exchange_rates: lookback_days=0, rates don't arrive late.
+-- orders/order_items/payments: lookback_days=3, late-arriving status updates.
 
 INSERT INTO pipeline_config (pipeline_name, source_type, watermark_column, lookback_days, window_size_hours, is_active, updated_at)
 VALUES
-    ('uci_retail_sales', 'CSV',        'InvoiceDate', 3, 24, 1, SYSUTCDATETIME()),
-    ('fx_rates',         'API',        'Date',        0, 24, 1, SYSUTCDATETIME()),
-    ('customers',        'PostgreSQL', 'updated_at',  1, 24, 0, SYSUTCDATETIME());
+    ('customers',          'PostgreSQL', 'updated_at', 1, 24, 1, SYSUTCDATETIME()),
+    ('customer_addresses', 'PostgreSQL', 'updated_at', 1, 24, 0, SYSUTCDATETIME()),
+    ('product_categories', 'PostgreSQL', 'updated_at', 1, 24, 0, SYSUTCDATETIME()),
+    ('suppliers',          'PostgreSQL', 'updated_at', 1, 24, 0, SYSUTCDATETIME()),
+    ('products',           'PostgreSQL', 'updated_at', 1, 24, 1, SYSUTCDATETIME()),
+    ('currencies',         'PostgreSQL', 'updated_at', 1, 24, 0, SYSUTCDATETIME()),
+    ('stores',             'PostgreSQL', 'updated_at', 1, 24, 0, SYSUTCDATETIME()),
+    ('employees',          'PostgreSQL', 'updated_at', 1, 24, 0, SYSUTCDATETIME()),
+    ('orders',             'PostgreSQL', 'updated_at', 3, 24, 1, SYSUTCDATETIME()),
+    ('order_items',        'PostgreSQL', 'updated_at', 3, 24, 1, SYSUTCDATETIME()),
+    ('payments',           'PostgreSQL', 'updated_at', 3, 24, 1, SYSUTCDATETIME()),
+    ('exchange_rates',     'PostgreSQL', 'updated_at', 0, 24, 1, SYSUTCDATETIME());
 GO
