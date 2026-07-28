@@ -55,6 +55,14 @@ variable "sql_admin_password" {
   sensitive   = true
 }
 
+# PostgreSQL Database
+
+variable "postgres_admin_password" {
+  description = "Administrator password for PostgreSQL Flexible Server — passed to Key Vault at bootstrap time. Never stored in state after secrets are migrated to CLI-managed bootstrap."
+  type        = string
+  sensitive   = true
+}
+
 # Alerts
 
 variable "alert_email" {

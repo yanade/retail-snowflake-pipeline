@@ -46,10 +46,22 @@ module "sql" {
   source              = "./modules/sql"
   project_name        = var.project_name
   environment         = var.environment
-  location            = var.sql_location  # francecentral — uksouth blocked on free trial
+  location            = var.sql_location # francecentral — uksouth blocked on free trial
   resource_group_name = azurerm_resource_group.main.name
   sql_admin_password  = var.sql_admin_password
   tags                = var.tags
+}
+
+# PostgreSQL Flexible Server — replica of the local Docker source, read by ADF
+
+module "postgres" {
+  source                  = "./modules/postgres"
+  project_name            = var.project_name
+  environment             = var.environment
+  location                = var.location
+  resource_group_name     = azurerm_resource_group.main.name
+  postgres_admin_password = var.postgres_admin_password
+  tags                    = var.tags
 }
 
 # Azure Key Vault — secrets management (vault only, no secrets)
@@ -67,14 +79,14 @@ module "keyvault" {
 # Azure Data Factory — ingestion orchestrator
 
 module "adf" {
-  source                            = "./modules/adf"
-  project_name                      = var.project_name
-  environment                       = var.environment
-  location                          = var.location
-  resource_group_name               = azurerm_resource_group.main.name
+  source               = "./modules/adf"
+  project_name         = var.project_name
+  environment          = var.environment
+  location             = var.location
+  resource_group_name  = azurerm_resource_group.main.name
   storage_account_name = module.adls.storage_account_name
-  key_vault_id                      = module.keyvault.key_vault_id
-  tags                              = var.tags
+  key_vault_id         = module.keyvault.key_vault_id
+  tags                 = var.tags
 }
 
 # Databricks — PySpark transformation workspace
@@ -110,7 +122,14 @@ resource "azurerm_key_vault_access_policy" "adf" {
   tenant_id    = data.azurerm_client_config.current.tenant_id
   object_id    = module.adf.data_factory_principal_id
 
-  secret_permissions = ["Get"]
+  secret_permissions = ["Get", "List"]
+}
+
+# Grant ADF Managed Identity read/write access to ADLS Gen2
+resource "azurerm_role_assignment" "adf_adls" {
+  scope                = module.adls.storage_account_id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = module.adf.data_factory_principal_id
 }
 
 # Azure Monitor — Log Analytics and pipeline failure alerts

@@ -60,3 +60,20 @@ output "sql_server_fqdn" {
   value       = module.sql.sql_server_fqdn
 }
 
+# PostgreSQL
+
+output "postgres_server_fqdn" {
+  description = "Fully qualified domain name of the PostgreSQL Flexible Server: used in bootstrap scripts and DATABASE_URL."
+  value       = module.postgres.postgres_server_fqdn
+}
+
+output "postgres_database_name" {
+  description = "Name of the retail_source database on the PostgreSQL Flexible Server."
+  value       = module.postgres.postgres_database_name
+}
+
+output "postgres_admin_username" {
+  description = "Administrator username for the PostgreSQL Flexible Server."
+  value       = module.postgres.postgres_admin_username
+}
+
