@@ -2,6 +2,7 @@ import json
 import pytest
 import requests
 from datetime import date
+from decimal import Decimal
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from ingestion.api_ingest.fetch_fx_rates import (
     load_config,
     fetch_fx_rates,
     save_rates_to_json,
+    upsert_rates_to_postgres,
 )
 
 
@@ -163,3 +165,52 @@ def test_save_rates_to_json_unique_filenames(sample_config, sample_rates, start_
 
     files = list(tmp_path.glob("fx_rates_*.json"))
     assert len(files) == 2  # two separate files created
+
+
+# ── upsert_rates_to_postgres() tests ─────────────────────────────────────────
+
+def test_upsert_rates_to_postgres_writes_expected_rows(sample_rates):
+    """
+    upsert_rates_to_postgres() flattens date/currency rates and writes them
+    with the expected idempotent conflict key.
+    """
+    mock_cursor = MagicMock()
+    mock_connection = MagicMock()
+    mock_connection.__enter__.return_value = mock_connection
+    mock_connection.cursor.return_value.__enter__.return_value = mock_cursor
+    mock_psycopg = MagicMock()
+    mock_psycopg.connect.return_value = mock_connection
+
+    with patch.dict("sys.modules", {"psycopg": mock_psycopg}):
+        row_count = upsert_rates_to_postgres(
+            rates=sample_rates,
+            database_url="postgresql://example",
+            base_currency="GBP",
+            source_system="freecurrencyapi",
+        )
+
+    assert row_count == 6
+    mock_psycopg.connect.assert_called_once_with("postgresql://example")
+    assert mock_cursor.executemany.call_count == 1
+
+    sql, rows = mock_cursor.executemany.call_args.args
+    assert "on conflict (rate_date, base_currency_code, target_currency_code)" in sql
+    assert rows[0]["base_currency_code"] == "GBP"
+    assert rows[0]["target_currency_code"] == "USD"
+    assert rows[0]["exchange_rate"] == Decimal("1.5619")
+    assert rows[0]["source_system"] == "freecurrencyapi"
+
+
+def test_upsert_rates_to_postgres_no_rows_skips_database():
+    """
+    upsert_rates_to_postgres() returns zero and avoids opening PostgreSQL when
+    the API returned no usable rates.
+    """
+    row_count = upsert_rates_to_postgres(
+        rates={},
+        database_url="postgresql://example",
+        base_currency="GBP",
+        source_system="freecurrencyapi",
+    )
+
+    assert row_count == 0

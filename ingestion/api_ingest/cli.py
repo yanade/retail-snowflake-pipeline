@@ -39,7 +39,12 @@ def parse_arguments():
         required=True,
         help="End date in YYYY-MM-DD format (2010-12-31)."
     )
-
+    parser.add_argument(
+        "--write-postgres",
+        action="store_true",
+        default=False,
+        help="Also upsert fetched rates into retail_oltp.exchange_rates (requires psycopg and DATABASE_URL)."
+    )
     args = parser.parse_args()
 
     # Convert string dates to date objects. Fail loudly if format is wrong

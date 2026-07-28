@@ -3,8 +3,9 @@ import logging
 from utils.logger import setup_logging
 from dotenv import load_dotenv
 import requests
-from datetime import date, timedelta, datetime, timezone
 import json
+from datetime import date, timedelta, datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 
 
@@ -15,7 +16,7 @@ def load_config() -> dict:
     """Load configuration from environment variables.
     Returns:
         dict with keys:
-            - api_key (str): ExchangeRate-API authentication key
+            - api_key (str): freecurrencyapi.com authentication key
             - base_currency (str): currency to convert FROM, e.g. 'GBP'
             - target_currencies (list[str]): currencies to convert TO,
               e.g. ['USD', 'EUR', 'JPY']
@@ -71,7 +72,7 @@ def load_config() -> dict:
 
 
 def fetch_fx_rates(config: dict, target_date: date) -> dict:
-    """Fetch FX rates from ExchangeRate-API for a specific date.
+    """Fetch FX rates from freecurrencyapi.com for a specific date.
         Calls the historical rates endpoint and extracts rates only for
         the target currencies defined in config.
 
@@ -286,3 +287,79 @@ def save_rates_to_json(
     logger.info("Saved %d date entries to %s", len(rates), output_file_path)
 
 
+def upsert_rates_to_postgres(
+    rates: dict,
+    database_url: str,
+    base_currency: str,
+    source_system: str = "freecurrencyapi",
+) -> int:
+    """
+    Upsert fetched exchange rates into retail_oltp.exchange_rates.
+
+    Flattens the {date: {currency: rate}} dict returned by
+    get_rates_for_date_range() into rows keyed by
+    (rate_date, base_currency_code, target_currency_code) — the same
+    idempotent key used in database/seed.py — so re-running a fetch for a
+    date that was already loaded updates the existing row instead of
+    duplicating it.
+
+    Args:
+        rates (dict): mapping of ISO date string to {currency_code: rate},
+            e.g. {"2010-12-01": {"USD": 1.5619, "EUR": 1.1891}, ...}
+        database_url (str): PostgreSQL connection string
+        base_currency (str): currency code all rates are converted FROM
+        source_system (str): value stored in exchange_rates.source_system
+
+    Returns:
+        int: number of rows upserted. Returns 0 without opening a database
+        connection when rates is empty.
+    """
+
+    rows = [
+        {
+            "rate_date": date.fromisoformat(date_str),
+            "base_currency_code": base_currency,
+            "target_currency_code": currency_code,
+            "exchange_rate": Decimal(str(rate)),
+            "source_system": source_system,
+        }
+        for date_str, currency_rates in rates.items()
+        for currency_code, rate in currency_rates.items()
+    ]
+
+    if not rows:
+        logger.info("No rates to upsert — skipping PostgreSQL write.")
+        return 0
+
+    import psycopg  # imported lazily: only needed when --write-postgres is used
+
+    with psycopg.connect(database_url) as connection:
+        with connection.cursor() as cursor:
+            cursor.executemany(
+                """
+                insert into retail_oltp.exchange_rates
+                    (
+                        rate_date,
+                        base_currency_code,
+                        target_currency_code,
+                        exchange_rate,
+                        source_system
+                    )
+                values
+                    (
+                        %(rate_date)s,
+                        %(base_currency_code)s,
+                        %(target_currency_code)s,
+                        %(exchange_rate)s,
+                        %(source_system)s
+                    )
+                on conflict (rate_date, base_currency_code, target_currency_code) do update
+                set
+                    exchange_rate = excluded.exchange_rate,
+                    source_system = excluded.source_system
+                """,
+                rows,
+            )
+
+    logger.info("Upserted %d exchange rate rows into PostgreSQL.", len(rows))
+    return len(rows)
