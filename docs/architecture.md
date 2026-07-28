@@ -16,9 +16,10 @@ This project demonstrates an end-to-end Azure Data Engineering platform,
 covering infrastructure provisioning, data ingestion, transformation,
 modelling, orchestration, validation and monitoring.
 
-The implementation uses the UCI Online Retail dataset (~500,000 rows,
-Dec 2010 – Dec 2011) together with Azure-native services provisioned
-using Terraform.
+The implementation uses a self-built PostgreSQL 16 OLTP source
+(`database/` — customers, orders, order_items, payments, products, stores,
+employees, currencies, exchange_rates) together with Azure-native services
+provisioned using Terraform.
 
 The architecture is inspired by production data platforms while remaining
 appropriately scoped for a portfolio project. Architectural trade-offs and
@@ -36,13 +37,13 @@ alternative approaches are documented in `architecture-decisions.md`.
 
 ```
 Sources
-  UCI Online Retail CSV  ──┐
-  ExchangeRate API       ──┼──▶  Azure Data Factory  (watermark-based incremental)
-  Terraform + GitHub     ──┘              │
+  PostgreSQL retail_oltp  ──┐
+  freecurrencyapi.com API ──┼──▶  Azure Data Factory  (watermark-based incremental)
+  Terraform + GitHub      ──┘              │
                                           ▼
                                ADLS Gen2  (3 zones)
                          Raw zone │ Curated zone │ Served zone
-                         CSV,     │ Parquet,     │ Snowflake-ready
+                         Parquet, │ Parquet,     │ Snowflake-ready
                          date-    │ incremental  │ Parquet
                          part.    │ partitions   │
                                           │
@@ -106,22 +107,23 @@ Terraform provisions all Azure infrastructure as code.
 ## ADLS Gen2 Zone Structure
 
 ```
+landing/
+    <table_name>/
+        year=YYYY/month=MM/day=DD/    ← ADF copies each retail_oltp table here, untouched
+                                         (customers, orders, order_items, payments, products,
+                                          stores, employees, currencies, exchange_rates, ...)
+
 raw/
-  source/
-    uci_retail/
-      online_retail.csv               ← full source file, uploaded once
-  fx_rates/
-    year=YYYY/month=MM/day=DD/        ← daily FX rate JSON from ExchangeRate API
+    <table_name>/
+        year=YYYY/month=MM/day=DD/    ← Databricks partitions by extraction date
 
 curated/
-  uci_retail/
-    year=YYYY/month=MM/day=DD/        ← Parquet, partitioned by InvoiceDate
-  fx_rates/
-    year=YYYY/month=MM/day=DD/
+    retail/
+        year=YYYY/month=MM/day=DD/    ← cleaned, FX-enriched Parquet
 
 served/
-  fact_sales/
-    year=YYYY/month=MM/day=DD/        ← Snowflake-ready Parquet
+    fact_sales/
+        year=YYYY/month=MM/day=DD/    ← Snowflake-ready Parquet
 ```
 
 ---
@@ -131,15 +133,15 @@ served/
 ```sql
 -- Tracks the last successfully loaded watermark per pipeline
 pipeline_watermark_control
-  pipeline_name     VARCHAR   -- e.g. 'pl_ingest_uci_retail'
-  last_watermark    DATETIME  -- last successfully processed InvoiceDate
+  pipeline_name     VARCHAR   -- e.g. 'orders', 'customers'
+  last_watermark    DATETIME  -- last successfully processed updated_at
   updated_at        DATETIME  -- timestamp of last watermark update
 
 -- Static configuration per pipeline
 pipeline_config
   pipeline_name     VARCHAR
-  source_type       VARCHAR   -- 'csv_file'
-  watermark_column  VARCHAR   -- 'InvoiceDate'
+  source_type       VARCHAR   -- 'PostgreSQL'
+  watermark_column  VARCHAR   -- 'updated_at'
   lookback_days     INT       -- re-query window for late-arriving records
   window_size_hours INT
   is_active         BIT
@@ -152,13 +154,13 @@ pipeline_config
 | Component | Status | Notes |
 |---|---|---|
 | Terraform — Azure infrastructure | Done | ADLS, ADF, SQL, Databricks, Key Vault, Monitor |
-| ADLS Gen2 — zone structure | Done | raw/curated/served containers created |
-| UCI CSV — raw zone upload | Done | `raw/source/uci_retail/online_retail.csv` |
-| ADF — linked services | Done | `ls_adls_dev`, `ls_azure_sql`, `ls_key_vault` |
-| ADF — datasets | Done | `ds_uci_retail_csv`, `ds_watermark_sql` |
-| ADF — ingestion pipeline | In progress | `pl_ingest_uci_retail` |
-| Azure SQL — watermark tables | Done | `pipeline_watermark_control`, `pipeline_config` seeded |
-| ExchangeRate API — fetch script | Done | `ingestion/api_ingest/` with unit tests |
+| ADLS Gen2 — zone structure | Done | raw/curated/served/landing containers created |
+| PostgreSQL — OLTP source database | Done | `database/` — schema, seed data, generated transactions |
+| ADF — linked services (ADLS, SQL, Key Vault) | Done | `ls_adls_dev`, `ls_azure_sql`, `ls_key_vault` |
+| Postgres → ADLS landing extractor | Planned | local Python script implementing ADF's watermark contract — see ADR-008 |
+| ADF — per-table ingestion pipeline (from landing zone onward) | Planned | replaces `pl_ingest_uci_retail` |
+| Azure SQL — watermark tables | Done | `pipeline_watermark_control`, `pipeline_config` seeded per retail_oltp table |
+| freecurrencyapi.com — fetch script | Done | `ingestion/api_ingest/` with unit tests, `--write-postgres` upsert |
 | Databricks — PySpark transformation | Planned | |
 | Dead-letter handler | Planned | |
 | Snowflake — star schema | Planned | |

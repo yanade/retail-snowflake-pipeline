@@ -80,8 +80,10 @@ Azure SQL Database provides native ADF integration (Lookup + Stored Procedure ac
 - Watermark survives pipeline failures — no duplicate or missing data if a run is interrupted
 
 ### Limitations
-- The watermark column is `InvoiceDate` — a source-assigned timestamp from the UCI dataset.
-- In a production system with a live source, a server-assigned `created_at` or `updated_at` column would be used instead.
+- The watermark column is `updated_at`, a server-assigned, trigger-refreshed
+  timestamp on every retail_oltp table (database/schema.sql) — the
+  production pattern noted as a future improvement in the original version
+  of this ADR is now what's actually implemented (see ADR-008).
 - Late-arriving records are partially mitigated by a configurable `lookback_days` window stored in `pipeline_config`.
 - Deduplication of overlapping records from the lookback window is handled in Databricks, not in ADF or the watermark table.
 
@@ -182,7 +184,8 @@ The root cause was identified by eliminating variables in order:
 
 ### Status
 
-Accepted
+Superseded by ADR-008 — the project moved from a static UCI CSV source to
+a self-built PostgreSQL OLTP source. Retained for historical record.
 
 ### Context
 
@@ -246,3 +249,140 @@ For production systems, a different ingestion pattern would normally be used:
 
 The current implementation is an intentional trade-off made for the objectives
 of this portfolio project.
+
+---
+
+## ADR-008: Migrating from a Static CSV Source to a Self-Built PostgreSQL OLTP Source
+
+### Status
+
+Accepted. Supersedes ADR-007.
+
+### Context
+
+ADR-007 accepted the UCI Online Retail CSV as the project's source, with
+`InvoiceDate` as an artificial watermark column and hand-picked bad rows
+standing in for real operational messiness. In practice this limited what
+the DQ/dead-letter/DVT layers could demonstrate — the "bad data" scenarios
+were manufactured on demand rather than arising from the shape of a real
+source system.
+
+### Decision
+
+Replace the static CSV with a self-built PostgreSQL 16 OLTP database
+(`database/`) that models a normalized, multi-country retail operational
+system (customers, orders, order_items, payments, products, stores,
+employees, currencies, exchange_rates). `database/generate_data.py`
+generates realistic transactional data with intentional but naturally
+distributed operational messiness (nulls, duplicate business keys, negative
+quantities, invalid statuses, missing FX rates), rather than manufacturing
+specific rows for specific test cases.
+
+### Alternatives Considered
+
+**Option 1 — Keep the UCI CSV (status quo)**
+Simplest, but the watermark column (`InvoiceDate`) is a source-assigned
+business date, not the server-assigned `created_at`/`updated_at` a real
+production pipeline would use — a gap ADR-002 explicitly flagged as a
+limitation.
+
+**Option 2 — Adopt an existing sample database (e.g. Pagila)**
+Considered and rejected earlier in the project. Pagila is already clean and
+normalized, which would weaken the DQ/dead-letter story, and its DVD-rental
+domain doesn't naturally need multi-currency FX conversion.
+
+**Option 3 — Self-built PostgreSQL OLTP source (Accepted)**
+More upfront effort (schema design, data generator), but gives full control
+over which realistic problems exist and lets the watermark be the genuine
+production pattern (`updated_at` + trigger) rather than a documented
+limitation.
+
+### Rationale
+
+A self-built operational source turns two previously-documented weaknesses
+into strengths: the watermark column is now the real production pattern
+(closing the gap ADR-002 flagged), and "bad data" arises naturally from
+`generate_data.py`'s randomized generation rather than being hand-inserted
+for a specific test.
+
+### Consequences
+
+- `ingestion/watermark/watermark_control.sql` now seeds one row per
+  `retail_oltp` table instead of two CSV/API-specific pipelines.
+- A local Python extractor implements the watermark contract (reads
+  `pipeline_config`/`pipeline_watermark_control`, writes Parquet to ADLS
+  `landing/<table>/`) — see `docs/architecture.md`'s Implementation Status.
+- `ingestion/upload_raw_data.py` (CSV → ADLS upload) is retired — replaced
+  by the per-table extractor above.
+- ADR-002's "Limitations" section is updated: the watermark column
+  limitation it flagged is resolved by this change.
+- ADR-007 is superseded but retained for historical record.
+
+---
+
+## ADR-009: Hybrid PostgreSQL Deployment — Local Docker for Development, Azure Flexible Server for ADF
+
+### Status
+
+Accepted
+
+### Context
+
+ADR-008 moved the source system from a static CSV to a self-built PostgreSQL
+OLTP database. That database initially ran only in local Docker
+(`database/docker-compose.yml`). Azure Data Factory cannot reach a
+database running on a developer's laptop without a Self-hosted Integration
+Runtime — a real, standard pattern, but one that adds meaningful
+operational overhead (service installation, registration keys, host
+networking, ongoing availability) for a portfolio project's marginal
+benefit over simply describing the pattern correctly.
+
+### Decision
+
+Run PostgreSQL in two places, for two different purposes:
+- **Local Docker** (`database/docker-compose.yml`) — fast schema iteration
+  and tuning `generate_data.py`'s intentional messiness, no cloud cost or
+  round-trip.
+- **Azure Database for PostgreSQL Flexible Server**
+  (`terraform/modules/postgres/`) — the instance ADF actually connects to.
+  Same `database/seed.py` and `database/generate_data.py` scripts populate
+  either target; only `DATABASE_URL` differs.
+
+### Alternatives Considered
+
+**Option A — Local Docker only**
+Free and fast, but structurally cannot deliver the project's own stated
+architecture ("ADF — watermark-based incremental ingestion") without added
+machinery ADF can't reach a laptop directly.
+
+**Option B — Azure PostgreSQL only**
+Architecturally correct and simplest to reason about, but loses fast local
+iteration for schema/data-generator changes, and costs run continuously
+during active development.
+
+**Option C — Hybrid (Accepted)**
+Combines both: fast local loop for development, cloud instance for
+anything that needs to be real (ADF connectivity). No sync/migration
+pipeline needed between them — `seed.py`/`generate_data.py` already take
+`DATABASE_URL` as a parameter, so "hybrid" is just running the same
+scripts against a different connection string, not a separate mechanism.
+
+### Consequences
+
+- `terraform/modules/postgres/` provisions the cloud server, firewall rule,
+  and database, following the same three-resource shape as
+  `terraform/modules/sql/`.
+- `postgres_admin_password` follows the existing Key Vault bootstrap
+  pattern from ADR-003 (`session.sh` → `terraform apply` →
+  `scripts/bootstrap_keyvault.sh`).
+- `scripts/bootstrap_postgres.sh` opens a firewall rule for the developer's
+  current IP each session, mirroring `scripts/bootstrap_watermark.sh`'s
+  existing pattern for the SQL server.
+- `DATABASE_URL` has no default fallback (see `utils/db.py`,
+  `database/seed.py`, `database/generate_data.py`) — it must be set
+  explicitly via `.env`, so the target environment is always a conscious
+  choice, never an accidental one.
+- Under ADR-004's cost discipline, the Flexible Server is destroyed and
+  recreated each session along with the rest of the stack; schema and data
+  are reloaded via `database/schema.sql` and the generator scripts, not
+  restored from a backup.

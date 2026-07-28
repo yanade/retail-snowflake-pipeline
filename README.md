@@ -11,15 +11,18 @@ error handling, and observability across a modern Azure + Snowflake stack.
 
 ## Overview
 
-This project ingests ~500k real UK retail transactions from the
-[UCI Online Retail dataset](https://archive.ics.uci.edu/dataset/352/online+retail),
-enriches them with live FX rates from the ExchangeRate API, transforms
-a flat source file into a star schema in Snowflake, and validates every
+This project runs against a self-built PostgreSQL 16 OLTP source
+(`database/`) — a normalized, multi-country retail operational database
+(customers, orders, order_items, payments, products, stores, employees),
+enriches order values with live FX rates from
+[freecurrencyapi.com](https://freecurrencyapi.com), transforms the
+normalized source into a star schema in Snowflake, and validates every
 incremental load with Google's Data Validation Tool (DVT).
 
-**Business scenario:** A UK-based online retailer needs a reliable daily
-pipeline that loads new transactions, converts GBP order values to USD,
-detects data quality issues automatically, and alerts the team on failures.
+**Business scenario:** An international retailer (stores in the UK,
+Germany, France, and Canada) needs a reliable pipeline that loads new
+orders, converts multi-currency order values to USD, detects data quality
+issues automatically, and alerts the team on failures.
 
 ---
 
@@ -28,8 +31,8 @@ detects data quality issues automatically, and alerts the team on failures.
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  SOURCES                                                    │
-│  UCI Online Retail CSV  ──┐                                 │
-│  freecurrencyapi API       ──┼──▶  Azure Data Factory          │
+│  PostgreSQL retail_oltp ──┐                                 │
+│  freecurrencyapi.com API──┼──▶  Azure Data Factory          │
 │  Terraform + GitHub     ──┘     (watermark incremental)     │
 └─────────────────────────────────────────────────────────────┘
                                         │
@@ -102,18 +105,19 @@ Terraform provisions all Azure infrastructure as code.
 ## Key Engineering Patterns
 
 **Incremental loading**
-The UCI dataset spans Dec 2010 – Dec 2011. Daily incremental loads are
-simulated by partitioning on `InvoiceDate`. ADF uses a watermark-based
-strategy — each run pulls only rows newer than the last loaded date.
-Databricks performs PySpark upsert (merge) on composite key
-`invoice_no + stock_code`. dbt models use `incremental` materialisation
-with `unique_key = 'sale_id'`.
+Every mutable `retail_oltp` table has an `updated_at` column refreshed by a
+PostgreSQL trigger on insert/update. ADF uses a per-table watermark strategy
+— each run pulls only rows newer than the last watermark
+(`ingestion/watermark/watermark_control.sql`). Databricks performs PySpark
+upsert (merge) on each table's primary key. dbt models use `incremental`
+materialisation with `unique_key = 'sale_id'`.
 
 **Dead-letter pattern**
-Records that fail at any pipeline stage (null `InvoiceNo`, unparseable
-dates, referential integrity failures) are captured in a Snowflake
-`dead_letter` table with error reason and raw payload. A separate
-Airflow DAG handles reprocessing of failed records.
+Records that fail at any pipeline stage (null `customer_id`, negative
+`order_items.quantity` that aren't returns, invalid `payment_status`,
+referential integrity failures) are captured in a Snowflake `dead_letter`
+table with error reason and raw payload. A separate Airflow DAG handles
+reprocessing of failed records.
 
 **Observability**
 Every pipeline run writes a row to a `pipeline_audit` table in Snowflake
@@ -132,7 +136,7 @@ Databricks and dbt each own a distinct layer — they are not interchangeable:
 | | Databricks | dbt |
 |---|---|---|
 | Responsibility | Data preparation | Dimensional modelling |
-| Input | Raw flat CSV from ADLS | Clean flat Parquet from served zone |
+| Input | Raw Postgres extract (Parquet) from ADLS | Clean flat Parquet from served zone |
 | Output | Clean enriched flat Parquet | Star schema tables in Snowflake |
 | Language | PySpark | SQL |
 | Tests | Unit tests on transformation logic | Data quality tests on the model |
@@ -162,8 +166,9 @@ plus `pipeline_audit` and `dead_letter` operational tables.
 
 ```
 retail-snowflake-pipeline/
+├── database/            # PostgreSQL OLTP source system
 ├── terraform/          # Azure infrastructure as code
-├── ingestion/          # ADF pipelines + ExchangeRate API script
+├── ingestion/          # ADF pipelines + freecurrencyapi.com script
 ├── transformation/     # Databricks PySpark notebooks
 ├── dbt/                # dbt models (staging → intermediate → marts)
 ├── validation/         # DVT validation suite
@@ -196,12 +201,12 @@ retail-snowflake-pipeline/
 ## Setup
 
 ### Prerequisites
+- Docker (for the PostgreSQL source — `database/docker-compose.yml` — and for Airflow)
 - Azure subscription
 - Snowflake account
 - [freecurrencyapi.com](https://freecurrencyapi.com) API key — free tier sufficient
 - Python 3.11
 - Terraform >= 1.6
-- Docker (for Airflow)
 
 ### Environment variables
 Copy `.env.example` to `.env` and fill in your credentials:
@@ -245,7 +250,7 @@ terraform apply
 source venv/bin/activate
 
 # fetch GBP rates for a date range
-python -m ingestion.api_ingest.main --start 2010-12-02 --end 2010-12-03
+python -m ingestion.api_ingest.main --start 2025-01-01 --end 2025-01-03
 
 # output saved to ingestion/api_ingest/output/
 ```
@@ -269,12 +274,16 @@ docker compose up -d
 
 ---
 
-## Dataset
+## Source Database
 
-**UCI Online Retail** — real UK e-commerce transactions (Dec 2010 – Dec 2011)
-- ~500,000 rows, 9 source columns
-- Source: https://archive.ics.uci.edu/dataset/352/online+retail
-- License: CC BY 4.0
+**PostgreSQL retail_oltp** — self-built, normalized OLTP schema simulating
+a live international retailer
+- 12 tables: customers, orders, order_items, payments, products, stores,
+  employees, currencies, exchange_rates, and more
+- Generated data includes intentional operational messiness (nulls,
+  duplicate business keys, negative quantities, invalid statuses, missing
+  FX rates) so the DQ/dead-letter layers have real problems to catch
+- Full schema and design rationale: `database/README.md`
 
 ---
 
