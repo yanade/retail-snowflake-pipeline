@@ -1,0 +1,24 @@
+{
+	"name": "ls_postgres_dev",
+	"properties": {
+		"annotations": [],
+		"type": "AzurePostgreSql",
+		"version": "2.0",
+		"typeProperties": {
+			"server": "retail-pipeline-dev-pg.postgres.database.azure.com",
+			"port": "5432",
+			"database": "retail_source",
+			"sslMode": 2,
+			"username": "pgadmin",
+			"password": {
+				"type": "AzureKeyVaultSecret",
+				"store": {
+					"referenceName": "ls_key_vault",
+					"type": "LinkedServiceReference"
+				},
+				"secretName": "postgres-admin-password"
+			},
+			"authenticationType": "Basic"
+		}
+	}
+}
