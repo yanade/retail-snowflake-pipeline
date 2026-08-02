@@ -1,0 +1,23 @@
+{
+	"name": "ls_azure_sql_watermark",
+	"properties": {
+		"annotations": [],
+		"type": "AzureSqlDatabase",
+		"typeProperties": {
+			"server": "retail-pipeline-dev-sql.database.windows.net",
+			"database": "watermark-db",
+			"encrypt": "mandatory",
+			"trustServerCertificate": false,
+			"authenticationType": "SQL",
+			"userName": "sqladmin",
+			"password": {
+				"type": "AzureKeyVaultSecret",
+				"store": {
+					"referenceName": "ls_key_vault",
+					"type": "LinkedServiceReference"
+				},
+				"secretName": "sql-admin-password"
+			}
+		}
+	}
+}
