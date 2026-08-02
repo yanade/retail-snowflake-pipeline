@@ -2,19 +2,9 @@
 	"name": "ls_adls_dev",
 	"type": "Microsoft.DataFactory/factories/linkedservices",
 	"properties": {
-		"type": "AzureBlobStorage",
+		"type": "AzureBlobFS",
 		"typeProperties": {
-			"connectionString": {
-				"type": "SecureString",
-				"value": "**********"
-			},
-			"servicePrincipalId": "",
-			"servicePrincipalKey": {
-				"type": "SecureString",
-				"value": "**********"
-			},
-			"tenant": "",
-			"encryptedCredential": "ew0KICAiVmVyc2lvbiI6ICIyMDE3LTExLTMwIiwNCiAgIlByb3RlY3Rpb25Nb2RlIjogIktleSIsDQogICJTZWNyZXRDb250ZW50VHlwZSI6ICJQbGFpbnRleHQiLA0KICAiQ3JlZGVudGlhbElkIjogIkRBVEFGQUNUT1JZQDUxRTdENjNDLUREQjYtNENCQS04REQ1LUQzMEI1NzgxMUZGRl8xZjNkZjA3OC00M2VlLTQ4OTctOWMxNi05ZWViYTU2ODFjZGEiDQp9"
+			"url": "https://retailpipelinedev.dfs.core.windows.net"
 		},
 		"annotations": []
 	}
