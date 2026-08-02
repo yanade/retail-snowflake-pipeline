@@ -1,0 +1,22 @@
+{
+	"name": "ds_postgres_orders",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "ls_postgres_dev",
+			"type": "LinkedServiceReference"
+		},
+		"parameters": {
+			"table_name": {
+				"type": "string",
+				"defaultValue": "orders"
+			}
+		},
+		"annotations": [],
+		"type": "AzurePostgreSqlTable",
+		"schema": [],
+		"typeProperties": {
+			"schema": "retail_oltp",
+			"table": "@dataset().table_name"
+		}
+	}
+}
