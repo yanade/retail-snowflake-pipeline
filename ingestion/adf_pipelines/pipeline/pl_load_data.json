@@ -72,6 +72,13 @@
 									"queryTimeout": "02:00:00",
 									"partitionOption": "None"
 								},
+								"dataset": {
+									"referenceName": "ds_watermark_ctrl",
+									"type": "DatasetReference",
+									"parameters": {
+										"table_name": "pipeline_watermark_control"
+									}
+								},
 								"firstRowOnly": true
 							}
 						},
