@@ -183,6 +183,7 @@
 							},
 							"userProperties": [],
 							"typeProperties": {
+								"storedProcedureName": "[dbo].[usp_update_watermark]",
 								"storedProcedureParameters": {
 									"pipeline_name": {
 										"value": {
