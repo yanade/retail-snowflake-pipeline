@@ -22,10 +22,10 @@
 						"partitionOption": "None"
 					},
 					"dataset": {
-						"referenceName": "ds_watermark_sql",
+						"referenceName": "ds_watermark_ctrl",
 						"type": "DatasetReference",
 						"parameters": {
-							"table_name": "pipeline_config"
+							"table_name": "pipeline_watermark_control"
 						}
 					},
 					"firstRowOnly": false
@@ -71,13 +71,6 @@
 									},
 									"queryTimeout": "02:00:00",
 									"partitionOption": "None"
-								},
-								"dataset": {
-									"referenceName": "ds_watermark_sql",
-									"type": "DatasetReference",
-									"parameters": {
-										"table_name": "pipeline_watermark_control"
-									}
 								},
 								"firstRowOnly": true
 							}
