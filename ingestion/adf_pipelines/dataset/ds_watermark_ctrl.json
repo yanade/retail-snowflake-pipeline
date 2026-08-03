@@ -1,0 +1,25 @@
+{
+	"name": "ds_watermark_ctrl",
+	"properties": {
+		"linkedServiceName": {
+			"referenceName": "ls_sql_watermark_ctrl",
+			"type": "LinkedServiceReference"
+		},
+		"parameters": {
+			"table_name": {
+				"type": "string",
+				"defaultValue": "pipeline_watermark_control"
+			}
+		},
+		"annotations": [],
+		"type": "AzureSqlTable",
+		"schema": [],
+		"typeProperties": {
+			"schema": "dbo",
+			"table": {
+				"value": "@dataset().table_name",
+				"type": "Expression"
+			}
+		}
+	}
+}
