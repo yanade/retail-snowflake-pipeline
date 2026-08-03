@@ -26,7 +26,16 @@
 		"type": "Json",
 		"typeProperties": {
 			"location": {
-				"type": "AzureBlobFSLocation"
+				"type": "AzureBlobFSLocation",
+				"fileName": {
+					"value": "@concat(dataset().table_name, '_', dataset().run_id, '.json')",
+					"type": "Expression"
+				},
+				"folderPath": {
+					"value": "@concat(dataset().table_name, '/year=', dataset().year, '/month=', dataset().month, '/day=', dataset().day)",
+					"type": "Expression"
+				},
+				"fileSystem": "raw"
 			}
 		},
 		"schema": {}
