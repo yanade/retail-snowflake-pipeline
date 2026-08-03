@@ -104,7 +104,10 @@
 							"typeProperties": {
 								"source": {
 									"type": "AzurePostgreSqlSource",
-									"query": "SELECT * FROM retail_oltp.@{item().pipeline_name}\nWHERE updated_at > '@{formatDateTime(addDays(utcnow(), mul(-1, int(item().lookback_days))), 'yyyy-MM-ddTHH:mm:ss')}'\nAND updated_at <= '@{formatDateTime(utcnow(), 'yyyy-MM-ddTHH:mm:ss')}'",
+									"query": {
+										"value": "SELECT * FROM retail_oltp.@{item().pipeline_name}\nWHERE updated_at > '@{formatDateTime(addDays(utcnow(), mul(-1, int(item().lookback_days))), 'yyyy-MM-ddTHH:mm:ss')}'\nAND updated_at <= '@{formatDateTime(utcnow(), 'yyyy-MM-ddTHH:mm:ss')}'",
+										"type": "Expression"
+									},
 									"partitionOption": "None",
 									"queryTimeout": "02:00:00"
 								},
