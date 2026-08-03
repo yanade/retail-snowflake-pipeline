@@ -1,0 +1,219 @@
+{
+	"name": "pl_load_data",
+	"properties": {
+		"activities": [
+			{
+				"name": "lkp_active_pipeline_configs",
+				"type": "Lookup",
+				"dependsOn": [],
+				"policy": {
+					"timeout": "0.12:00:00",
+					"retry": 0,
+					"retryIntervalInSeconds": 30,
+					"secureOutput": false,
+					"secureInput": false
+				},
+				"userProperties": [],
+				"typeProperties": {
+					"source": {
+						"type": "AzureSqlSource",
+						"sqlReaderQuery": "SELECT pipeline_name, watermark_column, lookback_days, window_size_hours\nFROM pipeline_config\nWHERE is_active = 1",
+						"queryTimeout": "02:00:00",
+						"partitionOption": "None"
+					},
+					"dataset": {
+						"referenceName": "ds_watermark_sql",
+						"type": "DatasetReference",
+						"parameters": {
+							"table_name": "pipeline_config"
+						}
+					},
+					"firstRowOnly": false
+				}
+			},
+			{
+				"name": "foreach_active_table",
+				"type": "ForEach",
+				"dependsOn": [
+					{
+						"activity": "lkp_active_pipeline_configs",
+						"dependencyConditions": [
+							"Completed"
+						]
+					}
+				],
+				"userProperties": [],
+				"typeProperties": {
+					"items": {
+						"value": "@activity('lkp_active_pipeline_configs').output.value",
+						"type": "Expression"
+					},
+					"isSequential": true,
+					"activities": [
+						{
+							"name": "lkp_current_watermark",
+							"type": "Lookup",
+							"dependsOn": [],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "AzureSqlSource",
+									"sqlReaderQuery": {
+										"value": "SELECT last_watermark FROM pipeline_watermark_control WHERE pipeline_name = '@{item().pipeline_name}'",
+										"type": "Expression"
+									},
+									"queryTimeout": "02:00:00",
+									"partitionOption": "None"
+								},
+								"dataset": {
+									"referenceName": "ds_watermark_sql",
+									"type": "DatasetReference",
+									"parameters": {
+										"table_name": "pipeline_watermark_control"
+									}
+								},
+								"firstRowOnly": true
+							}
+						},
+						{
+							"name": "copy_to_raw_zone",
+							"type": "Copy",
+							"dependsOn": [
+								{
+									"activity": "lkp_current_watermark",
+									"dependencyConditions": [
+										"Completed"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"source": {
+									"type": "AzurePostgreSqlSource",
+									"query": "SELECT * FROM retail_oltp.@{item().pipeline_name}\nWHERE updated_at > '@{formatDateTime(addDays(utcnow(), mul(-1, int(item().lookback_days))), 'yyyy-MM-ddTHH:mm:ss')}'\nAND updated_at <= '@{formatDateTime(utcnow(), 'yyyy-MM-ddTHH:mm:ss')}'",
+									"partitionOption": "None",
+									"queryTimeout": "02:00:00"
+								},
+								"sink": {
+									"type": "JsonSink",
+									"storeSettings": {
+										"type": "AzureBlobFSWriteSettings"
+									},
+									"formatSettings": {
+										"type": "JsonWriteSettings"
+									}
+								},
+								"enableStaging": false
+							},
+							"inputs": [
+								{
+									"referenceName": "ds_postgres_data",
+									"type": "DatasetReference",
+									"parameters": {
+										"table_name": {
+											"value": "@item().pipeline_name",
+											"type": "Expression"
+										}
+									}
+								}
+							],
+							"outputs": [
+								{
+									"referenceName": "ds_raw_adls",
+									"type": "DatasetReference",
+									"parameters": {
+										"table_name": {
+											"value": "@item().pipeline_name",
+											"type": "Expression"
+										},
+										"year": {
+											"value": "@formatDateTime(utcnow(),'yyyy')",
+											"type": "Expression"
+										},
+										"month": {
+											"value": "@formatDateTime(utcnow(),'MM')",
+											"type": "Expression"
+										},
+										"day": {
+											"value": "@formatDateTime(utcnow(),'dd')",
+											"type": "Expression"
+										},
+										"run_id": {
+											"value": "@pipeline().RunId",
+											"type": "Expression"
+										}
+									}
+								}
+							]
+						},
+						{
+							"name": "sp_update_watermark",
+							"type": "SqlServerStoredProcedure",
+							"dependsOn": [
+								{
+									"activity": "copy_to_raw_zone",
+									"dependencyConditions": [
+										"Completed"
+									]
+								}
+							],
+							"policy": {
+								"timeout": "0.12:00:00",
+								"retry": 0,
+								"retryIntervalInSeconds": 30,
+								"secureOutput": false,
+								"secureInput": false
+							},
+							"userProperties": [],
+							"typeProperties": {
+								"storedProcedureName": "[dbo].[usp_update_watermark]",
+								"storedProcedureParameters": {
+									"pipeline_name": {
+										"value": {
+											"value": "@item().pipeline_name",
+											"type": "Expression"
+										},
+										"type": "String"
+									},
+									"rows_loaded": {
+										"value": {
+											"value": "@activity('copy_to_raw_zone').output.rowsCopied",
+											"type": "Expression"
+										},
+										"type": "Int32"
+									},
+									"window_end": {
+										"value": {
+											"value": "@formatDateTime(utcnow(),'yyyy-MM-ddTHH:mm:ss')",
+											"type": "Expression"
+										},
+										"type": "DateTime"
+									}
+								}
+							},
+							"linkedServiceName": {
+								"referenceName": "ls_azure_sql_watermark",
+								"type": "LinkedServiceReference"
+							}
+						}
+					]
+				}
+			}
+		],
+		"annotations": []
+	}
+}
