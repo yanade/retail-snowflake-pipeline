@@ -183,7 +183,6 @@
 							},
 							"userProperties": [],
 							"typeProperties": {
-								"storedProcedureName": "[dbo].[usp_update_watermark]",
 								"storedProcedureParameters": {
 									"pipeline_name": {
 										"value": {
@@ -207,6 +206,10 @@
 										"type": "DateTime"
 									}
 								}
+							},
+							"linkedServiceName": {
+								"referenceName": "ls_sql_watermark_ctrl",
+								"type": "LinkedServiceReference"
 							}
 						}
 					]
