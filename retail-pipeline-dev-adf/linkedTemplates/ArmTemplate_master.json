@@ -15,15 +15,27 @@
 			"type": "string",
 			"defaultValue": "https://retail-pipeline-dev-kv.vault.azure.net/"
 		},
-		"ls_azure_sql_properties_typeProperties_server": {
+		"ls_postgres_dev_properties_typeProperties_server": {
+			"type": "string",
+			"defaultValue": "retail-pipeline-dev-pg.postgres.database.azure.com"
+		},
+		"ls_postgres_dev_properties_typeProperties_database": {
+			"type": "string",
+			"defaultValue": "retail_source"
+		},
+		"ls_postgres_dev_properties_typeProperties_username": {
+			"type": "string",
+			"defaultValue": "pgadmin"
+		},
+		"ls_sql_watermark_ctrl_properties_typeProperties_server": {
 			"type": "string",
 			"defaultValue": "retail-pipeline-dev-sql.database.windows.net"
 		},
-		"ls_azure_sql_properties_typeProperties_database": {
+		"ls_sql_watermark_ctrl_properties_typeProperties_database": {
 			"type": "string",
 			"defaultValue": "watermark-db"
 		},
-		"ls_azure_sql_properties_typeProperties_userName": {
+		"ls_sql_watermark_ctrl_properties_typeProperties_userName": {
 			"type": "string",
 			"defaultValue": "sqladmin"
 		},
@@ -60,14 +72,23 @@
 					"ls_key_vault_properties_typeProperties_baseUrl": {
 						"value": "[parameters('ls_key_vault_properties_typeProperties_baseUrl')]"
 					},
-					"ls_azure_sql_properties_typeProperties_server": {
-						"value": "[parameters('ls_azure_sql_properties_typeProperties_server')]"
+					"ls_postgres_dev_properties_typeProperties_server": {
+						"value": "[parameters('ls_postgres_dev_properties_typeProperties_server')]"
 					},
-					"ls_azure_sql_properties_typeProperties_database": {
-						"value": "[parameters('ls_azure_sql_properties_typeProperties_database')]"
+					"ls_postgres_dev_properties_typeProperties_database": {
+						"value": "[parameters('ls_postgres_dev_properties_typeProperties_database')]"
 					},
-					"ls_azure_sql_properties_typeProperties_userName": {
-						"value": "[parameters('ls_azure_sql_properties_typeProperties_userName')]"
+					"ls_postgres_dev_properties_typeProperties_username": {
+						"value": "[parameters('ls_postgres_dev_properties_typeProperties_username')]"
+					},
+					"ls_sql_watermark_ctrl_properties_typeProperties_server": {
+						"value": "[parameters('ls_sql_watermark_ctrl_properties_typeProperties_server')]"
+					},
+					"ls_sql_watermark_ctrl_properties_typeProperties_database": {
+						"value": "[parameters('ls_sql_watermark_ctrl_properties_typeProperties_database')]"
+					},
+					"ls_sql_watermark_ctrl_properties_typeProperties_userName": {
+						"value": "[parameters('ls_sql_watermark_ctrl_properties_typeProperties_userName')]"
 					}
 				}
 			},
