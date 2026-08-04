@@ -156,9 +156,8 @@ pipeline_config
 | Terraform — Azure infrastructure | Done | ADLS, ADF, SQL, Databricks, Key Vault, Monitor |
 | ADLS Gen2 — zone structure | Done | raw/curated/served/landing containers created |
 | PostgreSQL — OLTP source database | Done | `database/` — schema, seed data, generated transactions |
-| ADF — linked services (ADLS, SQL, Key Vault) | Done | `ls_adls_dev`, `ls_azure_sql`, `ls_key_vault` |
-| Postgres → ADLS landing extractor | Planned | local Python script implementing ADF's watermark contract — see ADR-008 |
-| ADF — per-table ingestion pipeline (from landing zone onward) | Planned | replaces `pl_ingest_uci_retail` |
+| ADF — linked services (ADLS, Key Vault, Postgres, watermark SQL) | Done | `ls_adls_dev`, `ls_key_vault`, `ls_postgres_dev`, `ls_sql_watermark_ctrl` — all created directly in ADF Studio, not Terraform. |
+| ADF — per-table ingestion pipeline | Done | `pl_load_data` — config-driven watermark ingestion across all 12 `retail_oltp` tables (Option C hybrid, ADR-009). See `ingestion/README.md`. |
 | Azure SQL — watermark tables | Done | `pipeline_watermark_control`, `pipeline_config` seeded per retail_oltp table |
 | freecurrencyapi.com — fetch script | Done | `ingestion/api_ingest/` with unit tests, `--write-postgres` upsert |
 | Databricks — PySpark transformation | Planned | |
