@@ -8,7 +8,7 @@
 				"dependsOn": [],
 				"policy": {
 					"timeout": "0.12:00:00",
-					"retry": 0,
+					"retry": 2,
 					"retryIntervalInSeconds": 30,
 					"secureOutput": false,
 					"secureInput": false
@@ -38,7 +38,7 @@
 					{
 						"activity": "lkp_active_pipeline_configs",
 						"dependencyConditions": [
-							"Completed"
+							"Succeeded"
 						]
 					}
 				],
@@ -56,7 +56,7 @@
 							"dependsOn": [],
 							"policy": {
 								"timeout": "0.12:00:00",
-								"retry": 0,
+								"retry": 2,
 								"retryIntervalInSeconds": 30,
 								"secureOutput": false,
 								"secureInput": false
@@ -89,13 +89,13 @@
 								{
 									"activity": "lkp_current_watermark",
 									"dependencyConditions": [
-										"Completed"
+										"Succeeded"
 									]
 								}
 							],
 							"policy": {
 								"timeout": "0.12:00:00",
-								"retry": 0,
+								"retry": 2,
 								"retryIntervalInSeconds": 30,
 								"secureOutput": false,
 								"secureInput": false
@@ -105,7 +105,7 @@
 								"source": {
 									"type": "AzurePostgreSqlSource",
 									"query": {
-										"value": "SELECT * FROM retail_oltp.@{item().pipeline_name}\nWHERE updated_at > '@{formatDateTime(addDays(utcnow(), mul(-1, int(item().lookback_days))), 'yyyy-MM-ddTHH:mm:ss')}'\nAND updated_at <= '@{formatDateTime(utcnow(), 'yyyy-MM-ddTHH:mm:ss')}'",
+										"value": "SELECT * FROM retail_oltp.@{item().pipeline_name}\nWHERE @{item().watermark_column} > '@{formatDateTime(addDays(activity('lkp_current_watermark').output.firstRow.last_watermark, mul(-1, int(item().lookback_days))), 'yyyy-MM-ddTHH:mm:ss')}'\nAND @{item().watermark_column} <= '@{formatDateTime(utcnow(), 'yyyy-MM-ddTHH:mm:ss')}'",
 										"type": "Expression"
 									},
 									"partitionOption": "None",
@@ -170,13 +170,13 @@
 								{
 									"activity": "copy_to_raw_zone",
 									"dependencyConditions": [
-										"Completed"
+										"Succeeded"
 									]
 								}
 							],
 							"policy": {
 								"timeout": "0.12:00:00",
-								"retry": 0,
+								"retry": 2,
 								"retryIntervalInSeconds": 30,
 								"secureOutput": false,
 								"secureInput": false
