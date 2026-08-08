@@ -65,24 +65,27 @@ VALUES
     ('exchange_rates',     '1900-01-01', NULL, SYSUTCDATETIME());
 GO
 
--- Phase 1 slice: customers + products (master data feeding dim_customer/dim_product)
--- plus orders/order_items/payments/exchange_rates (transactional + FX). Enough to
--- build a complete fact_sales + dims end to end without all 12 pipelines up front.
--- Remaining tables seeded but inactive — same pattern scales to them later.
+-- All 12 retail_oltp tables are ingested. The reference tables are small and
+-- cost almost nothing per run, and having them in the raw zone means the dbt
+-- dimensions can be built without a second ingestion pass later.
 --
 -- exchange_rates: lookback_days=0, rates don't arrive late.
 -- orders/order_items/payments: lookback_days=3, late-arriving status updates.
+-- Everything else: lookback_days=1, enough to absorb one missed nightly run.
+--
+-- window_size_hours is not read by pl_load_data. The Copy activity always
+-- closes its window at utcnow(). Kept for a future chunked backfill.
 
 INSERT INTO pipeline_config (pipeline_name, source_type, watermark_column, lookback_days, window_size_hours, is_active, updated_at)
 VALUES
     ('customers',          'PostgreSQL', 'updated_at', 1, 24, 1, SYSUTCDATETIME()),
-    ('customer_addresses', 'PostgreSQL', 'updated_at', 1, 24, 0, SYSUTCDATETIME()),
-    ('product_categories', 'PostgreSQL', 'updated_at', 1, 24, 0, SYSUTCDATETIME()),
-    ('suppliers',          'PostgreSQL', 'updated_at', 1, 24, 0, SYSUTCDATETIME()),
+    ('customer_addresses', 'PostgreSQL', 'updated_at', 1, 24, 1, SYSUTCDATETIME()),
+    ('product_categories', 'PostgreSQL', 'updated_at', 1, 24, 1, SYSUTCDATETIME()),
+    ('suppliers',          'PostgreSQL', 'updated_at', 1, 24, 1, SYSUTCDATETIME()),
     ('products',           'PostgreSQL', 'updated_at', 1, 24, 1, SYSUTCDATETIME()),
-    ('currencies',         'PostgreSQL', 'updated_at', 1, 24, 0, SYSUTCDATETIME()),
-    ('stores',             'PostgreSQL', 'updated_at', 1, 24, 0, SYSUTCDATETIME()),
-    ('employees',          'PostgreSQL', 'updated_at', 1, 24, 0, SYSUTCDATETIME()),
+    ('currencies',         'PostgreSQL', 'updated_at', 1, 24, 1, SYSUTCDATETIME()),
+    ('stores',             'PostgreSQL', 'updated_at', 1, 24, 1, SYSUTCDATETIME()),
+    ('employees',          'PostgreSQL', 'updated_at', 1, 24, 1, SYSUTCDATETIME()),
     ('orders',             'PostgreSQL', 'updated_at', 3, 24, 1, SYSUTCDATETIME()),
     ('order_items',        'PostgreSQL', 'updated_at', 3, 24, 1, SYSUTCDATETIME()),
     ('payments',           'PostgreSQL', 'updated_at', 3, 24, 1, SYSUTCDATETIME()),

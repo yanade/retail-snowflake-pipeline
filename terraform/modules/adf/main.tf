@@ -11,6 +11,19 @@ resource "azurerm_data_factory" "main" {
     type = "SystemAssigned"
   }
 
+  # Git integration was first set up through the ADF Studio UI. It is declared
+  # here so Terraform stops treating it as drift and proposing its removal.
+  # Publishing in ADF Studio commits the pipeline JSON back to this repo
+  # under root_folder.
+  github_configuration {
+    account_name       = var.github_account_name
+    branch_name        = var.github_branch_name
+    git_url            = var.github_url
+    repository_name    = var.github_repository_name
+    root_folder        = var.github_root_folder
+    publishing_enabled = true
+  }
+
   tags = var.tags
 }
 

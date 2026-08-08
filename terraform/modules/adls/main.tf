@@ -29,8 +29,3 @@ resource "azurerm_storage_data_lake_gen2_filesystem" "served" {
   name               = "served"
   storage_account_id = azurerm_storage_account.main.id
 }
-
-resource "azurerm_storage_data_lake_gen2_filesystem" "landing" {
-  name               = "landing"
-  storage_account_id = azurerm_storage_account.main.id
-}

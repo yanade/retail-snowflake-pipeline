@@ -48,7 +48,7 @@ issues automatically, and alerts the team on failures.
                                         ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  TRANSFORM — Databricks PySpark                             │
-│  Incremental merge · FX conversion · flat → star schema     │
+│  Incremental merge · FX conversion · flat → flat            │
 │                    │               │                        │
 │              happy path        bad records                  │
 │                    │               ▼                        │
@@ -136,7 +136,7 @@ Databricks and dbt each own a distinct layer — they are not interchangeable:
 | | Databricks | dbt |
 |---|---|---|
 | Responsibility | Data preparation | Dimensional modelling |
-| Input | Raw Postgres extract (Parquet) from ADLS | Clean flat Parquet from served zone |
+| Input | Raw Postgres extract (JSON) from ADLS | Clean flat Parquet from served zone |
 | Output | Clean enriched flat Parquet | Star schema tables in Snowflake |
 | Language | PySpark | SQL |
 | Tests | Unit tests on transformation logic | Data quality tests on the model |
@@ -185,9 +185,9 @@ retail-snowflake-pipeline/
 - [x] FX rates ingestion script — freecurrencyapi.com (`ingestion/api_ingest/`)
 - [x] Unit tests — 15 tests passing (`tests/ingestion/api_ingest/`)
 - [x] Terraform — Azure infrastructure
-- [ ] ADLS Gen2 — 3-zone storage with date partitioning
-- [ ] ADF — watermark-based incremental pipeline
-- [ ] Databricks — PySpark incremental transformation
+- [x] ADLS Gen2 — 3-zone storage with date partitioning
+- [x] ADF — watermark-based incremental pipeline
+- [x] Databricks — PySpark incremental transformation
 - [ ] Dead-letter handler
 - [ ] Snowflake — star schema
 - [ ] dbt — staging, intermediate, mart models + tests

@@ -43,7 +43,7 @@ Sources
                                           ▼
                                ADLS Gen2  (3 zones)
                          Raw zone │ Curated zone │ Served zone
-                         Parquet, │ Parquet,     │ Snowflake-ready
+                         JSON,    │ Delta,       │ Snowflake-ready
                          date-    │ incremental  │ Parquet
                          part.    │ partitions   │
                                           │
@@ -91,7 +91,7 @@ Terraform provisions all Azure infrastructure as code.
 |---|---|
 | Azure Data Factory | Watermark-based incremental ingestion. Owns the watermark read and update cycle via Lookup, Copy, and Stored Procedure activities. |
 | Azure SQL Database | Watermark control store. Provides transactional watermark updates and pipeline configuration. |
-| ADLS Gen2 | Three-zone data lake: raw (source files), curated (Parquet, partitioned by date), served (Snowflake-ready Parquet). |
+| ADLS Gen2 | Three-zone data lake: raw (JSON written by ADF, partitioned by extraction date), curated (Delta, incremental merge), served (Snowflake-ready Parquet). |
 | Databricks PySpark | Raw → Curated → Served transformation. Incremental merge on composite key. FX enrichment. Dead-letter routing. |
 | Snowflake + dbt | Dimensional modelling. Star schema built from served Parquet. Incremental dbt models, dbt tests, dbt docs. |
 | DVT | Post-load validation. Row counts, null checks, sum reconciliation per increment. Results written to audit table. |
@@ -107,24 +107,25 @@ Terraform provisions all Azure infrastructure as code.
 ## ADLS Gen2 Zone Structure
 
 ```
-landing/
+raw/
     <table_name>/
-        year=YYYY/month=MM/day=DD/    ← ADF copies each retail_oltp table here, untouched
+        year=YYYY/month=MM/day=DD/    ← ADF copies each retail_oltp table here, untouched,
+            <table>_<run_id>.json        partitioned by extraction date
                                          (customers, orders, order_items, payments, products,
                                           stores, employees, currencies, exchange_rates, ...)
 
-raw/
-    <table_name>/
-        year=YYYY/month=MM/day=DD/    ← Databricks partitions by extraction date
-
 curated/
-    retail/
-        year=YYYY/month=MM/day=DD/    ← cleaned, FX-enriched Parquet
+    <table_name>/                     ← cleaned and deduplicated Delta tables, one per
+                                         source table, merged on primary key
 
 served/
     fact_sales/
         year=YYYY/month=MM/day=DD/    ← Snowflake-ready Parquet
 ```
+
+ADF writes straight to `raw` — there is no separate landing zone. The Copy
+activity already partitions by extraction date, so an extra hop would be a
+copy with no transformation attached to it.
 
 ---
 
@@ -154,7 +155,7 @@ pipeline_config
 | Component | Status | Notes |
 |---|---|---|
 | Terraform — Azure infrastructure | Done | ADLS, ADF, SQL, Databricks, Key Vault, Monitor |
-| ADLS Gen2 — zone structure | Done | raw/curated/served/landing containers created |
+| ADLS Gen2 — zone structure | Done | raw/curated/served containers created |
 | PostgreSQL — OLTP source database | Done | `database/` — schema, seed data, generated transactions |
 | ADF — linked services (ADLS, Key Vault, Postgres, watermark SQL) | Done | `ls_adls_dev`, `ls_key_vault`, `ls_postgres_dev`, `ls_sql_watermark_ctrl` — all created directly in ADF Studio, not Terraform. |
 | ADF — per-table ingestion pipeline | Done | `pl_load_data` — config-driven watermark ingestion across all 12 `retail_oltp` tables (Option C hybrid, ADR-009). See `ingestion/README.md`. |

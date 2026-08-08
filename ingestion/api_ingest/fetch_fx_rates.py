@@ -1,6 +1,9 @@
+import argparse
 import os
 import logging
+import time
 from utils.logger import setup_logging
+from utils.db import get_database_url
 from dotenv import load_dotenv
 import requests
 import json
@@ -10,6 +13,20 @@ from pathlib import Path
 
 
 logger = setup_logging()
+
+
+# Matches generate_data.py's default --days 30, so a plain run covers the
+# same window as a default data generation.
+DEFAULT_LOOKBACK_DAYS = 30
+
+# The free tier is rate limited per minute. Pacing requests keeps a normal
+# fetch under the limit; the retry settings are the safety net for when a
+# shared key or a longer range trips it anyway.
+REQUEST_DELAY_SECONDS = 1.0
+RATE_LIMIT_MAX_RETRIES = 3
+RATE_LIMIT_BACKOFF_SECONDS = 20
+HTTP_TOO_MANY_REQUESTS = 429
+REQUEST_TIMEOUT_SECONDS = 10
 
 
 def load_config() -> dict:
@@ -71,6 +88,66 @@ def load_config() -> dict:
 
 
 
+def request_rates(base_url: str, params: dict, target_date: date) -> requests.Response:
+    """
+    Issue a GET request to the FX API, retrying when it reports rate limiting.
+
+    Args:
+        base_url (str): endpoint URL, without query parameters
+        params (dict): query parameters, including the API key
+        target_date (date): the date being fetched, used only in log messages
+
+    Returns:
+        requests.Response: the successful response
+
+    Raises:
+        requests.HTTPError: for any non-retryable error status, or when the
+            rate limit persists across every retry. The message deliberately
+            omits the URL, because it carries the API key.
+        requests.Timeout: if a request exceeds REQUEST_TIMEOUT_SECONDS
+    """
+
+    for attempt in range(1, RATE_LIMIT_MAX_RETRIES + 1):
+        response = requests.get(base_url, params=params, timeout=REQUEST_TIMEOUT_SECONDS)
+
+        if response.status_code != HTTP_TOO_MANY_REQUESTS:
+            break
+
+        if attempt == RATE_LIMIT_MAX_RETRIES:
+            raise requests.HTTPError(
+                f"Rate limited by the FX API on {target_date} after "
+                f"{RATE_LIMIT_MAX_RETRIES} attempts. Try again later or "
+                "fetch a shorter date range."
+            )
+
+        # Prefer the server's own guidance when it tells us how long to wait
+        wait_seconds = int(
+            response.headers.get(
+                "Retry-After", RATE_LIMIT_BACKOFF_SECONDS * attempt
+            )
+        )
+        logger.warning(
+            "Rate limited on %s. Waiting %d seconds before retry %d of %d.",
+            target_date,
+            wait_seconds,
+            attempt + 1,
+            RATE_LIMIT_MAX_RETRIES,
+        )
+        time.sleep(wait_seconds)
+
+    try:
+        response.raise_for_status()
+    except requests.HTTPError:
+        # requests puts the full request URL in this message, and the URL
+        # carries the API key. Re-raise without it, and suppress the original
+        # exception so the key cannot resurface in the chained traceback.
+        raise requests.HTTPError(
+            f"FX API returned {response.status_code} for {target_date}."
+        ) from None
+
+    return response
+
+
 def fetch_fx_rates(config: dict, target_date: date) -> dict:
     """Fetch FX rates from freecurrencyapi.com for a specific date.
         Calls the historical rates endpoint and extracts rates only for
@@ -96,20 +173,19 @@ def fetch_fx_rates(config: dict, target_date: date) -> dict:
     base_currency = config["base_currency"]
     target_currencies = config["target_currencies"]
 
-    # Build the URL
+    # Pass query parameters to requests rather than building the URL by hand,
+    # so the API key is never part of a string this module formats or logs
     base_url = config["base_url"]
-    url = (
-        f"{base_url}?apikey={api_key}"
-        f"&base_currency={base_currency}"
-        f"&currencies={','.join(target_currencies)}"
-        f"&date={target_date.isoformat()}"
-    )
+    params = {
+        "apikey": api_key,
+        "base_currency": base_currency,
+        "currencies": ",".join(target_currencies),
+        "date": target_date.isoformat(),
+    }
 
     logger.info("Fetching FX rates for %s on %s", base_currency, target_date)
 
-
-    response = requests.get(url, timeout=10)  # 10 second timeout
-    response.raise_for_status()  # Raise HTTPError for bad responses
+    response = request_rates(base_url, params, target_date)
     data = response.json()
 
     # Validate the API's own result field before processing rates
@@ -208,6 +284,11 @@ def get_rates_for_date_range(
 
         # Move to the next day regardless of success or skip
         current_date += timedelta(days=1)
+
+        # Pace requests so a long range stays under the per-minute rate limit
+        # in the first place. No need to wait after the final date.
+        if current_date <= end_date:
+            time.sleep(REQUEST_DELAY_SECONDS)
 
     logger.info(
         "Completed fetching rates for range %s to %s. Total successful days: %d",
@@ -363,3 +444,91 @@ def upsert_rates_to_postgres(
 
     logger.info("Upserted %d exchange rate rows into PostgreSQL.", len(rows))
     return len(rows)
+
+
+def parse_args() -> argparse.Namespace:
+    """
+    Parse command line arguments for the FX fetch run.
+
+    Returns:
+        Namespace with start, end and write_postgres attributes.
+    """
+
+    parser = argparse.ArgumentParser(
+        description="Fetch historical FX rates and optionally load them into PostgreSQL."
+    )
+
+    default_end = datetime.now(timezone.utc).date()
+    # The range is inclusive at both ends, so subtract one less than the window length
+    default_start = default_end - timedelta(days=DEFAULT_LOOKBACK_DAYS - 1)
+
+    parser.add_argument(
+        "--start",
+        type=date.fromisoformat,  # argparse applies this to the raw string, so bad dates fail here
+        default=default_start,
+        help="First date to fetch, inclusive (YYYY-MM-DD).",
+    )
+    parser.add_argument(
+        "--end",
+        type=date.fromisoformat,
+        default=default_end,
+        help="Last date to fetch, inclusive (YYYY-MM-DD).",
+    )
+    parser.add_argument(
+        "--write-postgres",
+        action="store_true",
+        default=False,
+        help=(
+            "Also upsert fetched rates into retail_oltp.exchange_rates. "
+            "Requires DATABASE_URL. Without this flag the script only writes JSON."
+        ),
+    )
+
+    return parser.parse_args()
+
+
+def main() -> None:
+    """
+    Fetch FX rates for a date range, save them as JSON, and optionally
+    upsert them into PostgreSQL.
+
+    Raises:
+        RuntimeError: if no rates could be fetched for any date in the range.
+    """
+
+    args = parse_args()
+    config = load_config()
+
+    rates = get_rates_for_date_range(config, args.start, args.end)
+
+    # An empty dict means every date in the range failed. That is a
+    # configuration or quota problem, not a normal outcome, so stop here
+    # rather than writing an empty file or an empty table.
+    if not rates:
+        raise RuntimeError(
+            f"No rates fetched for {args.start} to {args.end}. "
+            "Check EXCHANGE_RATE_API_KEY and your API quota."
+        )
+
+    save_rates_to_json(
+        rates=rates,
+        output_dir=config["output_dir"],
+        base_currency=config["base_currency"],
+        target_currencies=config["target_currencies"],
+        start_date=args.start,
+        end_date=args.end,
+    )
+
+    if args.write_postgres:
+        row_count = upsert_rates_to_postgres(
+            rates=rates,
+            database_url=get_database_url(),
+            base_currency=config["base_currency"],
+        )
+        logger.info("Wrote %d exchange rate rows to PostgreSQL.", row_count)
+    else:
+        logger.info("JSON only. Pass --write-postgres to load into the database.")
+
+
+if __name__ == "__main__":
+    main()

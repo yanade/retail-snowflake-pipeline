@@ -312,6 +312,9 @@ for a specific test.
 - A local Python extractor implements the watermark contract (reads
   `pipeline_config`/`pipeline_watermark_control`, writes Parquet to ADLS
   `landing/<table>/`) — see `docs/architecture.md`'s Implementation Status.
+  **Superseded in practice:** the ADF pipeline `pl_load_data` now implements
+  this contract directly, writing JSON to `raw/<table>/` instead. The
+  `landing` container was never used and has been removed.
 - `ingestion/upload_raw_data.py` (CSV → ADLS upload) is retired — replaced
   by the per-table extractor above.
 - ADR-002's "Limitations" section is updated: the watermark column
