@@ -105,6 +105,15 @@ or, to target Azure instead, the connection string from
 `terraform output postgres_server_fqdn` plus the admin credentials from
 Key Vault (`postgres-admin-password`). See ADR-009 for why both exist.
 
+> **Troubleshooting:** if `psql "$DATABASE_URL"` seems to connect to the
+> wrong database (e.g. `schema.sql` reports "already exists" on a database
+> you expect to be empty), first check `echo $DATABASE_URL` — an empty
+> result means it isn't actually set in your shell (re-run `source
+> session.sh`). As a fallback, you can always connect with the explicit
+> connection string instead of the `$DATABASE_URL` variable, bypassing
+> shell-state issues entirely — just remember to keep it in sync with
+> `.env` if the password ever changes.
+
 ```bash
 python seed.py
 ```

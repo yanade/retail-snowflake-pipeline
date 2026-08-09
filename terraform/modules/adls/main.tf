@@ -29,3 +29,11 @@ resource "azurerm_storage_data_lake_gen2_filesystem" "served" {
   name               = "served"
   storage_account_id = azurerm_storage_account.main.id
 }
+
+# Managed location for the Unity Catalog catalog. Deliberately a separate
+# container: no working table lives here, so an accidental managed table
+# lands somewhere visible instead of in Databricks-owned storage.
+resource "azurerm_storage_data_lake_gen2_filesystem" "managed" {
+  name               = "managed"
+  storage_account_id = azurerm_storage_account.main.id
+}

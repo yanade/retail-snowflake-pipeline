@@ -10,8 +10,8 @@ output "workspace_url" {
   value       = azurerm_databricks_workspace.main.workspace_url
 }
 
-output "workspace_id" { 
-  description = "Azure resource ID of the Databricks workspace:used for role assignments."
+output "workspace_id" {
+  description = "Azure resource ID of the Databricks workspace: used for role assignments."
   value       = azurerm_databricks_workspace.main.id
 }
 

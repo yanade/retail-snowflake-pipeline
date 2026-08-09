@@ -389,3 +389,382 @@ scripts against a different connection string, not a separate mechanism.
   recreated each session along with the rest of the stack; schema and data
   are reloaded via `database/schema.sql` and the generator scripts, not
   restored from a backup.
+
+---
+
+## ADR-010: Curated Zone Layout, One Delta Table Per Source Table
+
+### Status
+
+Accepted
+
+### Context
+
+`docs/architecture.md` originally described the curated zone as a single
+`curated/retail/` dataset partitioned by date, implying the raw tables are
+joined on the way in. The Databricks transformation notebook needs to be
+restartable, and a single joined output makes a failure on one source table
+a failure for all of them.
+
+### Decision
+
+The curated zone holds one Delta table per source table, at
+`curated/<table_name>/`, mirroring the `retail_oltp` shape. Each is
+registered as an external table `retail_dev.curated.<table_name>`.
+
+No joins happen in the curated zone. All joining, FX enrichment and
+denormalisation happen on the way to `served/`.
+
+Auto Loader checkpoints live at `curated/_checkpoints/<table_name>/`. The
+underscore prefix keeps them out of the table namespace, and they are
+deliberately not registered as tables.
+
+### Alternatives Considered
+
+**Option A: a single joined `curated/retail/` dataset.**
+Fewer objects, and the served zone becomes a thin formatting step. Rejected
+because one bad source table blocks every table, a re-run reprocesses
+everything, and the curated layer stops mirroring the source, which makes
+lineage harder to explain.
+
+**Option B: Parquet rather than Delta.**
+Simpler and readable by anything. Rejected because incremental `MERGE`
+requires a transaction log. Without Delta, an upsert becomes read-all,
+rewrite-all, which defeats the point of incremental loading.
+
+### Rationale
+
+Per-table isolation is what makes step 4 restartable table by table. A
+failure in `order_items` leaves `customers` loaded and committed. Each table
+gets its own Delta log, its own checkpoint, and its own schema evolution,
+so adding a column to one source table cannot disturb another.
+
+### Consequences
+
+- `docs/architecture.md`'s zone diagram is updated to `curated/<table_name>/`.
+- The served zone is the only place a join exists, which makes the grain
+  rule in ADR-011 enforceable in exactly one place.
+- Checkpoint directories sit inside the curated container but are not tables.
+  Anything enumerating the container must skip paths beginning with `_`.
+
+---
+
+## ADR-011: Grain of the Served Fact File, One Row Per Order Line
+
+### Status
+
+Accepted
+
+### Context
+
+Grain is the single most consequential modelling decision, and the majority
+of dimensional modelling bugs are grain violations rather than logic errors.
+It must be stated once, unambiguously, and never violated.
+
+### Decision
+
+**The served fact file has exactly one row per
+`retail_oltp.order_items.order_item_id`.**
+
+`sale_id` is derived deterministically from `order_item_id`, not generated.
+This matters because dbt's incremental models use `unique_key = 'sale_id'`:
+a randomly assigned surrogate key would change on every re-run and the
+incremental merge would insert duplicates instead of updating rows.
+
+**The additivity rule that follows from this grain:**
+
+Order-level amounts (`orders.subtotal_amount`, `tax_amount`,
+`shipping_amount`, `discount_amount`, `total_amount`, and
+`payments.payment_amount`) repeat across every line of an order. They must
+never be summed at line grain. Only line-level measures are additive:
+`quantity`, `unit_price`, `discount_amount` and `tax_amount` from
+`order_items`, and `line_total_amount`.
+
+### Alternatives Considered
+
+**Option A: one row per order.**
+Simpler, and order totals become directly additive. Rejected because it
+discards the product dimension entirely. No product-level analysis is
+possible, which removes most of the point of `dim_product`.
+
+**Option B: one row per payment.**
+Rejected. Payments happen to be 1:1 with orders in the generated data, but
+that is an artefact of `generate_data.py` inserting exactly one payment per
+order, not a property of the domain. Partial payments and refunds would
+break it.
+
+### Rationale
+
+Line grain is the standard retail sales fact, it supports both product and
+order analysis, and it matches the `unique_key` the dbt design already
+assumes.
+
+### Consequences
+
+- Joining `payments` onto the fact fans out one payment across several
+  lines. `payment_status` may be carried as a degenerate attribute;
+  `payment_amount` must not be carried as a measure.
+- Returns are negative-quantity lines flagged `is_return`, per the decision
+  that negative quantity is a return rather than a bad record. They remain
+  at line grain and stay additive.
+- A fan-out assertion belongs in the DVT suite: the row count of the served
+  file must equal the row count of `curated.order_items` for the same
+  increment. Any join that silently multiplies rows fails this immediately.
+
+---
+
+## ADR-012: FX Conversion via GBP Cross Rates, and an Interim Dead-Letter Location
+
+### Status
+
+Accepted
+
+### Context
+
+Two specifications disagree with the data.
+
+`ingestion/api_ingest/fetch_fx_rates.py` fetches with `BASE_CURRENCY=GBP`,
+so every row in `retail_oltp.exchange_rates` is GBP-based: the rate answers
+"how many units of the target currency per one GBP".
+
+The README describes converting order values to USD. But orders are not
+denominated in GBP. `database/seed.py` seeds stores in GB, DE and CA, and
+`generate_data.py` sets `orders.currency_code` from `store.currency_code`.
+So the fact table contains GBP, EUR and CAD orders, and a direct
+"GBP amount times GBP-to-USD rate" join is wrong for most of them.
+
+Separately, `dead_letter` is specified as a Snowflake table. Snowflake does
+not exist yet, and the Databricks stage needs somewhere to put rejected
+records now.
+
+### Decision
+
+**FX direction.** Exchange rates remain GBP-based, one base currency for the
+whole table. An order in currency `C` converts to USD by cross rate:
+
+```
+usd_per_C = rate(GBP -> USD) / rate(GBP -> C)
+```
+
+For `C = GBP` the denominator is 1 by definition and the GBP-to-USD rate is
+used directly.
+
+**Fact columns.** `CLAUDE.md`'s `unit_price_gbp` and `total_gbp` are renamed
+to `unit_price_original` and `total_original`, alongside an explicit
+`currency_code` column. The old names assert a currency the data does not
+have. `fx_rate_to_usd` holds the derived cross rate actually applied, so
+every converted value is reproducible from the row itself.
+
+**Missing rates.** If no rate exists for a given `(rate_date, currency)`,
+the row is routed to dead-letter with `error_reason = 'missing_fx_rate'`.
+It is not loaded with a NULL `total_usd`, because a NULL measure silently
+understates every downstream sum.
+
+**Dead-letter location.** `dead_letter` is a Delta table in ADLS at
+`curated/_dead_letter/`, registered as `retail_dev.ops.dead_letter`, until
+the Snowflake warehouse exists. `raw_payload` is stored as a `STRING`
+containing JSON rather than a semi-structured type, which maps cleanly onto
+Snowflake's `VARIANT` via `PARSE_JSON` when the table migrates.
+
+### Alternatives Considered
+
+**Refetch rates with each order currency as base.**
+Removes the cross-rate arithmetic, but multiplies API calls by the number of
+currencies, and independently fetched bases can disagree slightly, so
+converting EUR to USD directly and via GBP would give different answers.
+
+**Store only GBP totals.**
+Matches the original column names, but misstates every non-GBP order. The
+column names were the error, not the data.
+
+**Allow NULL `total_usd` when a rate is missing.**
+Simplest to implement and the failure is invisible, which is exactly the
+objection.
+
+### Consequences
+
+- Notebook 02 needs `exchange_rates` pivoted or self-joined, because two
+  rates for the same date are required to compute one cross rate.
+- `CLAUDE.md`'s star schema section needs its column names updated.
+- Migrating `dead_letter` to Snowflake is a known future task, and the
+  `STRING`-holding-JSON choice exists specifically to make it cheap.
+- Because the real API returned rates for all 33 days including weekends,
+  no `missing_fx_rate` rejections will occur naturally with the current
+  data. The path still needs a test, which means seeding a gap deliberately.
+- DVT should assert that every served row has a non-null `fx_rate_to_usd`.
+
+---
+
+## ADR-013: Dimension Shape, Star Over Snowflake, and an Unknown Member for Guest Checkouts
+
+### Status
+
+Accepted
+
+### Context
+
+ADR-008 replaced the UCI CSV source with a self-built PostgreSQL OLTP schema.
+The dimension definitions were never systematically revised afterwards, so
+they still described UCI columns (`StockCode`, `Description`, `CustomerID`)
+that do not exist in the new source. Two genuine modelling choices were
+buried inside that stale description and had never been decided explicitly.
+
+The first: `retail_oltp` normalises `products` against `product_categories`
+and `suppliers`. A dimensional model can preserve that normalisation or
+collapse it.
+
+The second: `generate_data.py` produces guest checkouts by returning `None`
+from `insert_customer()` for roughly 8% of orders, so `orders.customer_id`
+is legitimately NULL. The dead-letter rules said null `customer_id` should be
+routed to dead-letter, which would discard 8% of all sales.
+
+### Decision
+
+**Star, not snowflake.** `category_name` and `supplier_name` are flattened
+into `dim_product`. `product_categories` and `suppliers` are still ingested
+into the curated zone, but never become dimensions of their own.
+
+**Guest checkouts map to an unknown member.** A NULL `orders.customer_id`
+resolves to `customer_key = -1` in `fact_sales`.
+
+**`dim_customer` must physically contain that row.** The unknown member is an
+artificial row inserted by the model, not an implied value. It carries
+`customer_key = -1`, `customer_id = NULL`, and a recognisable label such as
+`customer_number = 'UNKNOWN'`.
+
+**The dead-letter condition on null `customer_id` is removed.** Databricks
+stage rejections are now: zero quantity, invalid `payment_status`, unresolved
+`product_id`, and missing FX rate.
+
+### Alternatives Considered
+
+**Snowflake the product dimension.**
+Keeps `dim_category` and `dim_supplier` separate, avoids repeating category
+names across products, and makes a category rename a single-row update.
+Rejected because it adds two joins to every product query for a dimension
+with 10 products and 10 categories, where the duplication it prevents is
+measured in kilobytes.
+
+**Route guest checkouts to dead-letter, as originally written.**
+Rejected. A guest sale is a real sale. Revenue is revenue whether or not the
+buyer is known, and discarding 8% of transactions would misstate every
+revenue figure in the project.
+
+**Leave `customer_key = -1` as a convention without inserting the row.**
+Rejected, and this is the failure mode worth naming. Without the physical
+row: the fact-to-dimension join finds no match, dbt's `relationships` test on
+`fact_sales.customer_key` fails, and every customer-segmented report silently
+drops 8% of sales. The convention only works if the row exists.
+
+### Rationale
+
+The distinction driving both halves of this ADR is **legitimate absence
+versus data error**.
+
+A guest checkout is a legitimate absence. The business genuinely does not
+know who the customer was, and that is a normal, expected outcome. It gets an
+unknown member so the sale stays in the fact table and stays countable.
+
+An unresolved `product_id` is a data error. `generate_data.py` produces it by
+writing `source_product_sku = 'UNKNOWN-xxxx'` with a NULL `product_id` for
+about 2.5% of lines, simulating a broken reference. There is no product
+context to recover, so the row goes to dead-letter for investigation rather
+than being silently attributed to a placeholder product.
+
+Same NULL, different meaning, different handling. Deciding which one applies
+is a modelling judgement, not a technical one, which is exactly why it needs
+recording.
+
+### Consequences
+
+- `dim_customer` gains one artificial row. Any row count assertion on that
+  dimension must account for it: `count(dim_customer) = count(customers) + 1`.
+- DVT should assert the unknown member exists before `fact_sales` loads.
+  If it is missing, the fact load produces orphan keys rather than failing.
+- dbt's `relationships` test on `fact_sales.customer_key` becomes meaningful:
+  it now catches genuine referential breaks, because the expected NULL case
+  has a home.
+- `dim_product` carries denormalised `category_name` and `supplier_name`. A
+  category rename requires updating every affected product row, which is the
+  accepted cost of the star.
+- The schema definitions these decisions describe are moving out of
+  `CLAUDE.md`, which is gitignored, into `docs/`. Agent instructions belong
+  in `CLAUDE.md`; schemas, grain and data quality rules are project
+  artefacts and must be committed.
+
+---
+
+## ADR-014: A Dedicated Container for the Unity Catalog Managed Location
+
+### Status
+
+Accepted
+
+### Context
+
+Creating the `retail_dev` catalog failed with `INVALID_STATE: Metastore
+storage root URL does not exist. Default Storage is enabled in your account.`
+The auto-provisioned metastore has no root storage, so a catalog must either
+use Databricks Default Storage or be given an explicit `MANAGED LOCATION`.
+
+Every table in this project is external, with its path stated in the
+`CREATE TABLE`. The managed location should therefore never be used. The
+question is what happens when it is used by accident.
+
+That accident is not hypothetical. These two lines differ by one argument:
+
+```python
+df.write.saveAsTable("retail_dev.curated.orders")            # managed
+df.write.option("path", ...).saveAsTable("retail_dev...")    # external
+```
+
+Omitting `option("path", ...)` creates a managed table. It succeeds silently:
+the table appears, the data is queryable, and nothing indicates the bytes
+went somewhere unintended.
+
+### Decision
+
+Create a dedicated `managed` container in the `retailpipelinedev` storage
+account, register it as external location `retail_managed`, and point the
+catalog at it:
+
+```sql
+CREATE CATALOG retail_dev
+MANAGED LOCATION 'abfss://managed@retailpipelinedev.dfs.core.windows.net/';
+```
+
+The container is expected to stay empty for the life of the project.
+
+### Alternatives Considered
+
+**Databricks Default Storage.**
+Zero configuration, and no possibility of overlapping the data containers.
+Rejected because an accidental managed table would land in Databricks-owned
+storage: outside the storage account, outside Azure Cost Management, and
+unreachable by any tool that is not Databricks. It would also introduce a
+second storage location that `docs/architecture.md` does not describe.
+
+**`MANAGED LOCATION` inside the `curated` container.**
+No new container. Rejected because it places managed storage in the same
+container as external tables, and correctness then depends on every future
+path staying outside the managed prefix. A container boundary does not
+depend on anyone remembering anything.
+
+### Rationale
+
+Both rejected options are safe while nothing goes wrong. The chosen one is
+the only one that is still recoverable when something does. The mistake it
+guards against is silent, one keyword wide, and sitting in the exact code
+path we are about to write.
+
+The cost is one Terraform resource and one external location.
+
+### Consequences
+
+- `terraform/modules/adls/main.tf` gains a `managed` filesystem.
+- A non-empty `managed` container is a signal, not a normal state: it means
+  a managed table was created by mistake and should be investigated.
+- Verified empirically rather than assumed: Unity Catalog accepts a managed
+  location that is covered by an external location, provided it is a
+  different container from the external tables. `CREATE CATALOG` returned
+  `OK` and all three schemas were created under it.

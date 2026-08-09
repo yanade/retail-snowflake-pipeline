@@ -13,12 +13,12 @@ output "storage_account_name" {
 }
 
 output "raw_filesystem_name" {
-  description = "Raw zone: unprocessed Parquet files."
+  description = "Raw zone: JSON written by ADF, partitioned by extraction date."
   value       = module.adls.raw_filesystem_name
 }
 
 output "curated_filesystem_name" {
-  description = "Curated zone: cleaned and transformed Parquet files."
+  description = "Curated zone: one Delta table per source table, merged on primary key."
   value       = module.adls.curated_filesystem_name
 }
 
