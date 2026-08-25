@@ -98,7 +98,7 @@ Terraform provisions all Azure infrastructure as code.
 | Orchestration | Apache Airflow |
 | Dashboard | Streamlit |
 | CI/CD | GitHub Actions |
-| Language | Python 3.11, SQL |
+| Language | Python 3.13, SQL |
 
 ---
 
@@ -205,7 +205,7 @@ retail-snowflake-pipeline/
 - Azure subscription
 - Snowflake account
 - [freecurrencyapi.com](https://freecurrencyapi.com) API key — free tier sufficient
-- Python 3.11
+- Python 3.13
 - Terraform >= 1.6
 
 ### Environment variables

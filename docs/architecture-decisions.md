@@ -768,3 +768,137 @@ The cost is one Terraform resource and one external location.
   location that is covered by an external location, provided it is a
   different container from the external tables. `CREATE CATALOG` returned
   `OK` and all three schemas were created under it.
+
+---
+
+## ADR-015: Targeting Spark 4 Locally, and Decoupling Type Conversion from ANSI Mode
+
+### Status
+
+Accepted
+
+### Context
+
+`CLAUDE.md` recorded the transformation stack as Python 3.11 and Spark 3.5.
+That pin came from the project's own early notes rather than from any external
+constraint, and it was never re-derived after the Databricks design settled on
+serverless compute.
+
+Serverless changes the question. On classic compute the Databricks Runtime
+version is chosen at cluster creation, so a local environment can be matched to
+it. On serverless the runtime is managed by Databricks and moves forward on its
+own schedule. There is no version to match, which means exact local parity is
+not merely inconvenient, it is unattainable by construction.
+
+The real constraint is therefore not the documented pin but the runtime this
+code will execute on when Azure returns in September 2026, which will be on the
+Spark 4 line rather than 3.5.
+
+Package compatibility was verified against PyPI metadata rather than assumed:
+
+- `delta-spark` 3.x declares `pyspark>=3.5.0,<3.6.0`
+- `delta-spark` 4.4.0 declares `pyspark>=4.0.1,<=4.2.0`
+- `pyspark` 3.5.x declares Python support up to 3.11 only
+- `pyspark` 4.2.0 declares Python 3.10 through 3.14
+
+The local machine already runs Python 3.13.7 and OpenJDK 17.
+
+### Decision
+
+**Local development targets the Spark 4 line.** `requirements.txt` pins
+`pyspark==4.2.0`, `delta-spark==4.4.0`, and `pyarrow>=18.0.0`, running on the
+existing Python 3.13 interpreter and OpenJDK 17. No interpreter downgrade and
+no virtualenv rebuild are required.
+
+**Type conversion from the raw zone does not depend on the ANSI default.**
+Raw JSON fields that can carry operational garbage are read as strings and
+converted with `try_cast`, which returns NULL on failure regardless of the ANSI
+setting. A failed conversion is then classified by the ordinary data quality
+rules and routed to dead-letter. This is what the dead-letter design requires:
+a bad value must survive long enough to be classified, not abort the batch.
+
+**`spark.sql.ansi.enabled` is still declared explicitly in
+`transformation/spark_session.py`, set to `true`, and set to the same value on
+the Databricks side.** ANSI governs more than casts, including arithmetic
+overflow and division by zero, and those are defects in code we write rather
+than in data we receive.
+
+The division of responsibility is therefore: ANSI enabled for the logic we
+control, so it fails loudly, and `try_cast` for the data we do not trust, so it
+fails into dead-letter.
+
+### Alternatives Considered
+
+**Pin local development to Spark 3.5 to match a Databricks Runtime.**
+The conventional answer, and correct on classic compute. Rejected because
+serverless exposes no runtime version to match, so the parity being bought is
+imaginary. It would also force a downgrade to Python 3.11, a virtualenv
+rebuild, and a re-run of the existing test suite, all to align with a version
+that will not be running in production.
+
+**Leave ANSI mode at the version default.**
+Rejected, and this is the failure mode worth naming. With ANSI disabled a
+failed cast returns NULL silently; with ANSI enabled it raises. Spark 3.5
+defaults to disabled and Spark 4.0 defaults to enabled. The dead-letter
+classification in this project is built entirely on how invalid values behave,
+so inheriting the default would make data quality semantics a function of
+whichever runtime Databricks happens to be serving that month. Rules tested
+against silent NULLs would begin failing whole jobs after a runtime upgrade
+nobody requested.
+
+**Disable ANSI globally so that failed casts yield NULL.**
+The simplest way to keep the dead-letter path working, and the initial
+instinct. Rejected because it buys the soft behaviour everywhere rather than
+only where it is wanted. An arithmetic overflow in the FX conversion, or a
+division by zero in a computed measure, would also degrade to NULL and pass
+silently into `fact_sales`. `try_cast` confines the soft behaviour to the exact
+conversions that need it.
+
+**Defer local Spark entirely and first execute the code on Databricks in
+September.**
+Rejected on three grounds. Modules importing `pyspark.sql.types` cannot be
+import-checked at all without the package, so several hundred lines would be
+unverifiable by any tool. The bugs that matter most here are silent: a join
+that violates the ADR-011 grain produces a valid DataFrame and a wrong revenue
+figure rather than an exception. And under ADR-004's destroy-after-session cost
+discipline, each September debugging cycle costs an infrastructure rebuild and
+a cluster start, making it the most expensive possible place to discover a
+typo.
+
+### Rationale
+
+On serverless, "which Spark version" has no stable answer, so the durable move
+is to stop depending on version defaults at all.
+
+Pinning the local packages buys a working feedback loop, where a mistake costs
+seconds instead of a cluster start. Using `try_cast` removes the one behaviour
+whose drift would actually corrupt results, and removes it at the point of
+conversion rather than through a global switch. Together they replace an
+unattainable goal, matching the cluster, with an achievable one: making the
+behaviour that matters independent of the cluster.
+
+### Consequences
+
+- `CLAUDE.md` and `README.md` updated from Python 3.11 to 3.13, and the
+  transformation row now distinguishes local pins from the serverless runtime.
+- `requirements.txt` gains three pinned dependencies.
+- `transformation/spark_session.py` must set `spark.sql.ansi.enabled`
+  explicitly, with a comment stating why, so it is not tidied away later as
+  redundant configuration.
+- `try_cast` is the required conversion function for any field arriving from
+  the raw zone. A plain `cast` in that path is a defect, because it makes the
+  dead-letter route depend on a session setting.
+- `try_cast` cannot by itself distinguish a value that was NULL in the source
+  from a value that failed to parse. Where that distinction matters, and per
+  ADR-013 it does for `orders.customer_id`, the raw string must be tested for
+  NULL before conversion. That produces two separate `error_reason` values
+  rather than one.
+- Local Delta tables never leave the laptop, so Delta protocol compatibility
+  with the cluster is not a concern.
+- Auto Loader (`cloudFiles`) remains untestable locally. `read_raw()` is the
+  single boundary function whose body changes when the pipeline moves to
+  Databricks.
+- When compute is created in September, the first thing to verify is the Spark
+  version actually served, and whether ANSI is enabled there. If the project
+  ends up on classic compute pinned to Spark 3.5, this decision needs
+  revisiting.

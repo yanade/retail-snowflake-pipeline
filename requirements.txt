@@ -4,3 +4,9 @@ pytest
 pandas
 openpyxl
 psycopg[binary]
+
+# Transformation layer. Versions pinned per ADR-015: delta-spark 4.4.0
+# requires pyspark >=4.0.1,<=4.2.0, so these two move together or not at all.
+pyspark==4.2.0
+delta-spark==4.4.0
+pyarrow>=18.0.0
