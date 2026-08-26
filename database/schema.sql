@@ -13,7 +13,7 @@ end;
 $$;
 
 create table if not exists currencies (
-    currency_code char(3) primary key,
+    currency_code varchar(3) primary key,
     currency_name varchar(100) not null,
     currency_symbol varchar(10),
     decimal_places smallint not null default 2,
@@ -40,7 +40,7 @@ create table if not exists suppliers (
     supplier_id bigserial primary key,
     supplier_code varchar(50) not null,
     supplier_name varchar(200) not null,
-    country_code char(2),
+    country_code varchar(2),
     contact_email varchar(320),
     is_active boolean not null default true,
     created_at timestamptz not null default now(),
@@ -56,7 +56,7 @@ create table if not exists products (
     supplier_id bigint references suppliers(supplier_id),
     brand varchar(120),
     standard_unit_price numeric(12, 2),
-    default_currency_code char(3) references currencies(currency_code),
+    default_currency_code varchar(3) references currencies(currency_code),
     is_active boolean not null default true,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
@@ -74,7 +74,7 @@ create table if not exists customers (
     last_name varchar(100),
     email varchar(320),
     phone varchar(40),
-    country_code char(2),
+    country_code varchar(2),
     customer_status varchar(30) not null default 'ACTIVE',
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
@@ -85,14 +85,14 @@ comment on table customers is
 
 create table if not exists customer_addresses (
     address_id bigserial primary key,
-    customer_id bigint references customers(customer_id),
+    customer_id bigint not null references customers(customer_id),
     address_type varchar(30) not null default 'SHIPPING',
     address_line_1 varchar(255),
     address_line_2 varchar(255),
     city varchar(120),
     region varchar(120),
     postal_code varchar(40),
-    country_code char(2),
+    country_code varchar(2),
     is_default boolean not null default false,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
@@ -103,7 +103,7 @@ create table if not exists stores (
     store_code varchar(50) not null,
     store_name varchar(200) not null,
     store_type varchar(30) not null,
-    country_code char(2),
+    country_code varchar(2),
     city varchar(120),
     opened_date date,
     closed_date date,
@@ -136,8 +136,8 @@ create table if not exists employees (
 create table if not exists exchange_rates (
     exchange_rate_id bigserial primary key,
     rate_date date not null,
-    base_currency_code char(3) not null references currencies(currency_code),
-    target_currency_code char(3) not null references currencies(currency_code),
+    base_currency_code varchar(3) not null references currencies(currency_code),
+    target_currency_code varchar(3) not null references currencies(currency_code),
     exchange_rate numeric(18, 8) not null,
     source_system varchar(80) not null default 'demo_seed',
     created_at timestamptz not null default now(),
@@ -156,12 +156,12 @@ create table if not exists orders (
     employee_id bigint references employees(employee_id),
     order_status varchar(40) not null,
     order_date timestamptz not null,
-    currency_code char(3) not null references currencies(currency_code),
-    subtotal_amount numeric(12, 2),
-    tax_amount numeric(12, 2),
-    shipping_amount numeric(12, 2),
-    discount_amount numeric(12, 2),
-    total_amount numeric(12, 2),
+    currency_code varchar(3) not null references currencies(currency_code),
+    subtotal_amount numeric(12, 2) not null default 0,
+    tax_amount numeric(12, 2) not null default 0,
+    shipping_amount numeric(12, 2) not null default 0,
+    discount_amount numeric(12, 2) not null default 0,
+    total_amount numeric(12, 2) not null default 0,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
 );
@@ -182,7 +182,9 @@ create table if not exists order_items (
     line_total_amount numeric(12, 2),
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
-    constraint chk_order_items_line_number check (line_number > 0)
+    constraint chk_order_items_line_number check (line_number > 0),
+    constraint chk_order_items_unit_price
+        check (unit_price is null or unit_price >= 0)
 );
 
 comment on column order_items.quantity is
@@ -195,7 +197,7 @@ create table if not exists payments (
     payment_method varchar(40),
     payment_status varchar(40) not null,
     payment_amount numeric(12, 2),
-    currency_code char(3) references currencies(currency_code),
+    currency_code varchar(3) references currencies(currency_code),
     payment_date timestamptz,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
