@@ -208,6 +208,62 @@ def seed_stores(connection: psycopg.Connection) -> None:
     )
 
 
+def seed_employees(connection: psycopg.Connection) -> None:
+    """
+    Insert employee master data.
+
+    store_id is resolved from store_code rather than hardcoded, because
+    stores use a bigserial primary key whose values depend on insert order.
+
+    Args:
+        connection: Open PostgreSQL connection.
+    """
+
+    rows = [
+        {"employee_number": "EMP-0001", "store_code": "WEB-UK", "first_name": "Priya", "last_name": "Raman", "job_title": "Ecommerce Manager", "email": "priya.raman@example.com", "hire_date": date(2019, 2, 4), "termination_date": None, "is_active": True},
+        {"employee_number": "EMP-0002", "store_code": "WEB-UK", "first_name": "Daniel", "last_name": "Osei", "job_title": "Customer Support Lead", "email": "daniel.osei@example.com", "hire_date": date(2021, 6, 14), "termination_date": None, "is_active": True},
+        {"employee_number": "EMP-0003", "store_code": "LON-001", "first_name": "Grace", "last_name": "Whitfield", "job_title": "Store Manager", "email": "grace.whitfield@example.com", "hire_date": date(2017, 3, 1), "termination_date": None, "is_active": True},
+        {"employee_number": "EMP-0004", "store_code": "LON-001", "first_name": "Tomasz", "last_name": "Nowak", "job_title": "Sales Assistant", "email": "tomasz.nowak@example.com", "hire_date": date(2022, 9, 19), "termination_date": None, "is_active": True},
+        {"employee_number": "EMP-0005", "store_code": "BER-001", "first_name": "Lena", "last_name": "Fischer", "job_title": "Store Manager", "email": "lena.fischer@example.com", "hire_date": date(2019, 5, 6), "termination_date": None, "is_active": True},
+        {"employee_number": "EMP-0006", "store_code": "TOR-001", "first_name": "Marc", "last_name": "Beaulieu", "job_title": "Store Manager", "email": "marc.beaulieu@example.com", "hire_date": date(2020, 10, 12), "termination_date": None, "is_active": True},
+        {"employee_number": "EMP-0007", "store_code": "TOR-001", "first_name": "Amara", "last_name": "Nwosu", "job_title": "Sales Assistant", "email": "amara.nwosu@example.com", "hire_date": date(2023, 1, 23), "termination_date": None, "is_active": True},
+        # PAR-OUT closed on 2025-12-31, so this employee carries a termination
+        # date. Exercises chk_employees_dates and gives the pipeline a real
+        # inactive record rather than an all-active dimension.
+        {"employee_number": "EMP-0008", "store_code": "PAR-OUT", "first_name": "Julien", "last_name": "Mercier", "job_title": "Store Manager", "email": "julien.mercier@example.com", "hire_date": date(2017, 6, 5), "termination_date": date(2025, 12, 31), "is_active": False},
+    ]
+    execute_many(
+        connection,
+        """
+        insert into retail_oltp.employees
+            (employee_number, store_id, first_name, last_name, job_title, email, hire_date, termination_date, is_active)
+        values
+            (
+                %(employee_number)s,
+                (select store_id from retail_oltp.stores where store_code = %(store_code)s),
+                %(first_name)s,
+                %(last_name)s,
+                %(job_title)s,
+                %(email)s,
+                %(hire_date)s,
+                %(termination_date)s,
+                %(is_active)s
+            )
+        on conflict (employee_number) do update
+        set
+            store_id = excluded.store_id,
+            first_name = excluded.first_name,
+            last_name = excluded.last_name,
+            job_title = excluded.job_title,
+            email = excluded.email,
+            hire_date = excluded.hire_date,
+            termination_date = excluded.termination_date,
+            is_active = excluded.is_active
+        """,
+        rows,
+    )
+
+
 def seed_products(connection: psycopg.Connection) -> None:
     """
     Insert product master data.
@@ -309,6 +365,7 @@ def run_seed_steps(connection: psycopg.Connection) -> None:
     seed_categories(connection)
     seed_suppliers(connection)
     seed_stores(connection)
+    seed_employees(connection)
     seed_products(connection)
 
 

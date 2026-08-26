@@ -47,6 +47,20 @@ LAST_NAMES = ["Taylor", "Brown", "Wilson", "Davies", "Evans", "Khan", "Murphy", 
 ORDER_STATUSES = ["PENDING", "PAID", "SHIPPED", "COMPLETED", "CANCELLED", "RETURNED"]
 PAYMENT_METHODS = ["CARD", "PAYPAL", "APPLE_PAY", "BANK_TRANSFER", "GIFT_CARD"]
 PAYMENT_STATUSES = ["PENDING", "AUTHORIZED", "CAPTURED", "FAILED", "REFUNDED", "PARTIALLY_REFUNDED", "SETTLED_UNKNOWN"]
+STREET_NAMES = ["Oak Lane", "Mill Road", "Station Street", "Harbour View", "Elm Close", "Kings Way"]
+# Cities per country so a customer's address is geographically consistent
+# with their country_code, rather than a random pairing like GB / Sydney.
+CITIES_BY_COUNTRY = {
+    "GB": ["London", "Manchester", "Bristol"],
+    "DE": ["Berlin", "Hamburg", "Munich"],
+    "FR": ["Paris", "Lyon", "Nantes"],
+    "US": ["Austin", "Denver", "Seattle"],
+    "CA": ["Toronto", "Vancouver", "Montreal"],
+    "AU": ["Sydney", "Melbourne", "Perth"],
+}
+# Used when the customer's country_code is NULL, which is a deliberate
+# data quality case in COUNTRIES above.
+FALLBACK_CITIES = ["London", "Berlin", "Toronto"]
 
 
 @dataclass(frozen=True)
@@ -194,6 +208,58 @@ def money(value: Decimal) -> Decimal:
     return value.quantize(Decimal("0.01"))
 
 
+def insert_customer_address(
+    connection: psycopg.Connection,
+    rng: random.Random,
+    customer_id: int,
+    country_code: str | None,
+) -> None:
+    """
+    Insert one or two addresses for a newly created customer.
+
+    Only called for registered customers. Guest checkouts return before
+    this point, which is what customer_addresses.customer_id being NOT NULL
+    requires.
+
+    Args:
+        connection: Open PostgreSQL connection.
+        rng: Random number generator.
+        customer_id: Owning customer primary key.
+        country_code: The customer's country, so the city matches it.
+    """
+
+    # Most customers ship and bill to the same place. A minority keep a
+    # separate billing address, which is what makes address_type meaningful.
+    address_types = ["SHIPPING"] if rng.random() < 0.75 else ["SHIPPING", "BILLING"]
+    cities = CITIES_BY_COUNTRY.get(country_code, FALLBACK_CITIES)
+    with connection.cursor() as cursor:
+        for position, address_type in enumerate(address_types):
+            cursor.execute(
+                """
+                insert into retail_oltp.customer_addresses
+                    (customer_id, address_type, address_line_1, address_line_2,
+                     city, region, postal_code, country_code, is_default)
+                values
+                    (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    customer_id,
+                    address_type,
+                    f"{rng.randint(1, 240)} {rng.choice(STREET_NAMES)}",
+                    # Second address line is genuinely optional in the domain,
+                    # so it is left NULL most of the time rather than padded.
+                    f"Flat {rng.randint(1, 40)}" if rng.random() < 0.2 else None,
+                    rng.choice(cities),
+                    None if rng.random() < 0.3 else rng.choice(["Greater London", "Bavaria", "Ontario", "Ile-de-France"]),
+                    f"{rng.choice('ABCDEFGHJKLMNPQRSTUVWXYZ')}{rng.randint(1, 99)} {rng.randint(1, 9)}{rng.choice('ABDEFGHJLNPQRSTUWXYZ')}{rng.choice('ABDEFGHJLNPQRSTUWXYZ')}",
+                    country_code,
+                    # Exactly one default per customer. Without this the
+                    # dimension has no way to pick a primary address.
+                    position == 0,
+                ),
+            )
+
+
 def insert_customer(connection: psycopg.Connection, rng: random.Random) -> int | None:
     """
     Insert a customer or return None for guest checkout.
@@ -212,6 +278,9 @@ def insert_customer(connection: psycopg.Connection, rng: random.Random) -> int |
     last_name = rng.choice(LAST_NAMES)
     email_name = "shared.customer" if rng.random() < 0.04 else f"{first_name}.{last_name}.{rng.randint(1, 9999)}"
     email = None if rng.random() < 0.06 else f"{email_name.lower()}@example.com"
+    # Hoisted out of the insert tuple so the address below can reuse it.
+    # NULL is a deliberate data quality case, see COUNTRIES.
+    country_code = rng.choice(COUNTRIES)
     with connection.cursor() as cursor:
         cursor.execute(
             """
@@ -227,11 +296,12 @@ def insert_customer(connection: psycopg.Connection, rng: random.Random) -> int |
                 None if rng.random() < 0.03 else last_name,
                 email,
                 None if rng.random() < 0.15 else f"+44{rng.randint(7000000000, 7999999999)}",
-                rng.choice(COUNTRIES),
+                country_code,
                 rng.choice(["ACTIVE", "ACTIVE", "ACTIVE", "INACTIVE"]),
             ),
         )
         customer_id = cursor.fetchone()[0]
+    insert_customer_address(connection, rng, customer_id, country_code)
     return customer_id
 
 
