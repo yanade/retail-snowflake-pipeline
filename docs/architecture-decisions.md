@@ -511,6 +511,44 @@ assumes.
   file must equal the row count of `curated.order_items` for the same
   increment. Any join that silently multiplies rows fails this immediately.
 
+### Amendment, 2026-08-28: `order_status` is carried as a degenerate dimension
+
+The original decision above asked which order-level **measures** must be kept
+out of the fact, and answered correctly. It never asked which order-level
+**attributes** the fact needs, and that omission left a defect.
+
+Without `order_status`, a CANCELLED order contributes to revenue exactly like
+a COMPLETED one, and nothing in `fact_sales` can tell them apart. Measured on
+the seeded dataset: CANCELLED is 121 orders and 11,802.33 of 130,367.59 in
+line revenue, which is 9.1%. PENDING adds a further 2.9% that is not yet
+realised revenue at all. Every headline figure in the project was overstated
+by roughly a ninth.
+
+**Decision: `order_status` is carried into `fact_sales` as a degenerate
+dimension**, alongside `order_id` and `order_number`.
+
+It is an attribute, not a measure, so it does not conflict with the
+additivity rule above. Repeating it across the lines of an order is correct:
+you filter on it, you never sum it.
+
+**Degenerate rather than its own dimension.** Six values, no attributes of
+their own, and no hierarchy. A `dim_order_status` would add a join to every
+revenue query in exchange for nothing.
+
+Consequences:
+
+- Every revenue figure must filter on `order_status`. This is not optional,
+  and a report that omits the filter is wrong rather than merely incomplete.
+- `order_status` and `is_return` are not interchangeable. `is_return` is line
+  level, derived from `quantity < 0`. `order_status = 'RETURNED'` is order
+  level. An order can be RETURNED while its lines stay positive, and a
+  negative line can appear under any status.
+- Unknown values are quarantined rather than passed through. A status nobody
+  has seen before is an unknown answer to "does this count as revenue?", and
+  letting it flow silently defaults that answer to yes. The whitelist lives in
+  `transformation/config/table_config.py`; `orders.order_status` has no check
+  constraint in the source, so the pipeline is the only place this is caught.
+
 ---
 
 ## ADR-012: FX Conversion via GBP Cross Rates, and an Interim Dead-Letter Location
