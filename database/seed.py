@@ -268,29 +268,48 @@ def seed_products(connection: psycopg.Connection) -> None:
     """
     Insert product master data.
 
+    category_id and supplier_id are resolved from their business codes rather
+    than hardcoded, because both parents use bigserial keys whose values depend
+    on insert order. Without them dim_product's category_name and supplier_name
+    would be NULL for every product, which ADR-013 requires to be populated.
+
     Args:
         connection: Open PostgreSQL connection.
     """
 
     rows = [
-        {"sku": "SKU-HOME-001", "product_name": "Ceramic Dinner Plate", "price": Decimal("8.50"), "currency": "GBP"},
-        {"sku": "SKU-HOME-002", "product_name": "Cotton Tea Towel", "price": Decimal("4.25"), "currency": "GBP"},
-        {"sku": "SKU-HOME-003", "product_name": "Glass Table Lamp", "price": Decimal("39.99"), "currency": "EUR"},
-        {"sku": "SKU-FASH-010", "product_name": "Linen Shirt", "price": Decimal("34.00"), "currency": "EUR"},
-        {"sku": "SKU-FASH-011", "product_name": "Wool Scarf", "price": Decimal("22.50"), "currency": "EUR"},
-        {"sku": "SKU-BEAU-020", "product_name": "Vitamin C Serum", "price": Decimal("18.75"), "currency": "GBP"},
-        {"sku": "SKU-ELEC-030", "product_name": "Wireless Earbuds", "price": Decimal("69.99"), "currency": "USD"},
-        {"sku": "SKU-ELEC-031", "product_name": "Bluetooth Speaker", "price": Decimal("54.95"), "currency": "USD"},
-        {"sku": "SKU-DUP-001", "product_name": "Duplicate SKU Test Product A", "price": Decimal("12.00"), "currency": "GBP"},
-        {"sku": "SKU-DUP-001", "product_name": "Duplicate SKU Test Product B", "price": Decimal("13.00"), "currency": "GBP"},
+        {"sku": "SKU-HOME-001", "product_name": "Ceramic Dinner Plate", "brand": "Northbridge Home", "category_code": "HOME-KITCHEN", "supplier_code": "SUP-UK-001", "price": Decimal("8.50"), "currency": "GBP"},
+        {"sku": "SKU-HOME-002", "product_name": "Cotton Tea Towel", "brand": "Northbridge Home", "category_code": "HOME-KITCHEN", "supplier_code": "SUP-UK-001", "price": Decimal("4.25"), "currency": "GBP"},
+        {"sku": "SKU-HOME-003", "product_name": "Glass Table Lamp", "brand": "Lumiere", "category_code": "HOME-DECOR", "supplier_code": "SUP-FR-009", "price": Decimal("39.99"), "currency": "EUR"},
+        {"sku": "SKU-FASH-010", "product_name": "Linen Shirt", "brand": "Rhine Basics", "category_code": "FASHION-MEN", "supplier_code": "SUP-DE-014", "price": Decimal("34.00"), "currency": "EUR"},
+        {"sku": "SKU-FASH-011", "product_name": "Wool Scarf", "brand": "Rhine Basics", "category_code": "FASHION-WOMEN", "supplier_code": "SUP-DE-014", "price": Decimal("22.50"), "currency": "EUR"},
+        {"sku": "SKU-BEAU-020", "product_name": "Vitamin C Serum", "brand": "Aurelia", "category_code": "BEAUTY-SKIN", "supplier_code": "SUP-DE-014", "price": Decimal("18.75"), "currency": "GBP"},
+        {"sku": "SKU-ELEC-030", "product_name": "Wireless Earbuds", "brand": "Pacific Audio", "category_code": "ELEC-AUDIO", "supplier_code": "SUP-US-022", "price": Decimal("69.99"), "currency": "USD"},
+        {"sku": "SKU-ELEC-031", "product_name": "Bluetooth Speaker", "brand": "Pacific Audio", "category_code": "ELEC-AUDIO", "supplier_code": "SUP-US-022", "price": Decimal("54.95"), "currency": "USD"},
+        # brand stays NULL on the two duplicate-SKU rows. An unbranded product
+        # is a legitimate state, and keeping it in the data means the pipeline
+        # is exercised against it rather than only against the happy path.
+        {"sku": "SKU-DUP-001", "product_name": "Duplicate SKU Test Product A", "brand": None, "category_code": "HOME", "supplier_code": "SUP-UK-001", "price": Decimal("12.00"), "currency": "GBP"},
+        {"sku": "SKU-DUP-001", "product_name": "Duplicate SKU Test Product B", "brand": None, "category_code": "HOME", "supplier_code": "SUP-UK-001", "price": Decimal("13.00"), "currency": "GBP"},
     ]
     execute_many(
         connection,
         """
         insert into retail_oltp.products
-            (sku, product_name, standard_unit_price, default_currency_code)
+            (sku, product_name, brand, category_id, supplier_id,
+             standard_unit_price, default_currency_code)
         values
-            (%(sku)s, %(product_name)s, %(price)s, %(currency)s)
+            (
+                %(sku)s,
+                %(product_name)s,
+                %(brand)s,
+                (select category_id from retail_oltp.product_categories
+                 where category_code = %(category_code)s),
+                (select supplier_id from retail_oltp.suppliers
+                 where supplier_code = %(supplier_code)s),
+                %(price)s,
+                %(currency)s
+            )
         """,
         rows,
     )
