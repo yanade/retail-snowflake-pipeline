@@ -61,8 +61,6 @@ SOURCE_SCHEMAS: dict[str, StructType] = {
             StructField("currency_code", StringType(), True),
             StructField("currency_name", StringType(), True),
             StructField("currency_symbol", StringType(), True),
-            # smallint in the source. ShortType() is the exact mirror, but it is
-            # a rarely used type that invites "corrections"; widening is safe.
             StructField("decimal_places", IntegerType(), True),
             StructField("is_active", BooleanType(), True),
             StructField("created_at", TimestampType(), True),
@@ -189,11 +187,9 @@ SOURCE_SCHEMAS: dict[str, StructType] = {
         [
             StructField("order_item_id", LongType(), True),
             StructField("order_id", LongType(), True),
-            # integer, not bigint: bounded by the size of one order.
             StructField("line_number", IntegerType(), True),
             StructField("product_id", LongType(), True),
             StructField("source_product_sku", StringType(), True),
-            # integer, and negative means a return. See ADR-011.
             StructField("quantity", IntegerType(), True),
             StructField("unit_price", DecimalType(12, 2), True),
             StructField("discount_amount", DecimalType(12, 2), True),
