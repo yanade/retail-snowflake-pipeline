@@ -3,9 +3,29 @@
 	"properties": {
 		"activities": [
 			{
+				"name": "set_window_end",
+				"type": "SetVariable",
+				"dependsOn": [],
+				"userProperties": [],
+				"typeProperties": {
+					"variableName": "window_end",
+					"value": {
+						"value": "@formatDateTime(utcnow(), 'yyyy-MM-ddTHH:mm:ss')",
+						"type": "Expression"
+					}
+				}
+			},
+			{
 				"name": "lkp_active_pipeline_configs",
 				"type": "Lookup",
-				"dependsOn": [],
+				"dependsOn": [
+					{
+						"activity": "set_window_end",
+						"dependencyConditions": [
+							"Succeeded"
+						]
+					}
+				],
 				"policy": {
 					"timeout": "0.12:00:00",
 					"retry": 2,
@@ -105,7 +125,7 @@
 								"source": {
 									"type": "AzurePostgreSqlSource",
 									"query": {
-										"value": "SELECT * FROM retail_oltp.@{item().pipeline_name}\nWHERE @{item().watermark_column} > '@{formatDateTime(addDays(activity('lkp_current_watermark').output.firstRow.last_watermark, mul(-1, int(item().lookback_days))), 'yyyy-MM-ddTHH:mm:ss')}'\nAND @{item().watermark_column} <= '@{formatDateTime(utcnow(), 'yyyy-MM-ddTHH:mm:ss')}'",
+										"value": "SELECT * FROM retail_oltp.@{item().pipeline_name}\nWHERE @{item().watermark_column} > '@{formatDateTime(addDays(activity('lkp_current_watermark').output.firstRow.last_watermark, mul(-1, int(item().lookback_days))), 'yyyy-MM-ddTHH:mm:ss')}'\nAND @{item().watermark_column} <= '@{variables('window_end')}'",
 										"type": "Expression"
 									},
 									"partitionOption": "None",
@@ -144,15 +164,15 @@
 											"type": "Expression"
 										},
 										"year": {
-											"value": "@formatDateTime(utcnow(),'yyyy')",
+											"value": "@formatDateTime(variables('window_end'),'yyyy')",
 											"type": "Expression"
 										},
 										"month": {
-											"value": "@formatDateTime(utcnow(),'MM')",
+											"value": "@formatDateTime(variables('window_end'),'MM')",
 											"type": "Expression"
 										},
 										"day": {
-											"value": "@formatDateTime(utcnow(),'dd')",
+											"value": "@formatDateTime(variables('window_end'),'dd')",
 											"type": "Expression"
 										},
 										"run_id": {
@@ -201,7 +221,7 @@
 									},
 									"window_end": {
 										"value": {
-											"value": "@formatDateTime(utcnow(),'yyyy-MM-ddTHH:mm:ss')",
+											"value": "@variables('window_end')",
 											"type": "Expression"
 										},
 										"type": "DateTime"
@@ -217,6 +237,11 @@
 				}
 			}
 		],
+		"variables": {
+			"window_end": {
+				"type": "String"
+			}
+		},
 		"annotations": []
 	}
 }

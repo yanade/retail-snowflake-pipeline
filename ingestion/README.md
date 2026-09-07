@@ -99,9 +99,21 @@ for that run's landed file, named `<table>_<pipeline_run_id>.json`.
 ## Known limitations
 
 - No scheduled trigger — manual/on-demand only.
-- `updated_at <= now()` and the watermark's stored `window_end` are computed
-  independently (`utcnow()` evaluated separately in the Copy activity and
-  the Stored Procedure), so there's a small gap — typically the Copy
-  activity's own runtime, a few seconds — between what was actually queried
-  and what gets recorded as the new watermark. Negligible for on-demand or
-  daily runs; would need reconciling if this ever ran at high frequency.
+- The window end is frozen once per run. `set_window_end` writes the
+  `window_end` variable before the loop, and the Copy activity's upper bound,
+  the raw-zone path and the Stored Procedure all read that one value. This
+  closes the earlier gap, where `utcnow()` was evaluated independently in each
+  place and rows whose `updated_at` landed between the Copy's upper bound and
+  the recorded watermark were skipped. With `lookback_days = 0`, as on
+  `exchange_rates`, those rows were never picked up again.
+  **Not yet validated.** These edits were made directly in the repository JSON
+  while the factory was torn down, so they have never been through Studio's
+  Validate all, and have never been published or run. At the next bring-up,
+  before Publish: open `pl_load_data` in Studio, run Validate all, then Debug,
+  and confirm `last_watermark` matches the `<=` bound in the Copy activity's
+  resolved query, identically for all 12 tables.
+- No row-count reconciliation. `rows_loaded` stores `rowsCopied` but is never
+  compared with anything, so a partial copy that still reports Succeeded
+  advances the watermark. The intended check is `rowsRead` against
+  `rowsCopied` inside `usp_update_watermark`, held until a Debug run confirms
+  the Azure PostgreSQL connector actually populates `rowsRead`.
