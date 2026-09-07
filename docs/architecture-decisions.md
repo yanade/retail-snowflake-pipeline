@@ -19,7 +19,7 @@ Airflow is the primary workflow orchestrator. Azure Data Factory is responsible
 for Azure-native ingestion and incremental data movement.
 
 ### Context
-The pipeline has three distinct concerns: data movement (CSV → ADLS),
+The pipeline has three distinct concerns: data movement (PostgreSQL + FX API → ADLS),
 transformation (PySpark), and validation + alerting (DVT, Slack, audit table).
 ADF is optimized for Azure-native data movement but is less suitable for
 Python-centric operational workflows such as DVT execution, custom validation
@@ -39,8 +39,8 @@ Airflow DAG  ←  single source of truth for pipeline state
 Separating workflow orchestration from Azure-native ingestion reduces coupling
 between orchestration logic and cloud-specific data movement services. In this
 pipeline, that boundary is concrete: Airflow owns retries, branching, audit
-logging, and Slack alerts — ADF owns the incremental copy from ADLS and the
-watermark update in Azure SQL.
+logging, and Slack alerts — ADF owns the incremental copy from PostgreSQL into
+ADLS and the watermark update in Azure SQL.
 
 ### Trade-off accepted
 Two systems to monitor and maintain instead of one. When a pipeline fails,

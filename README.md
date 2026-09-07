@@ -40,9 +40,9 @@ issues automatically, and alerts the team on failures.
 ┌─────────────────────────────────────────────────────────────┐
 │  STORAGE — ADLS Gen2 (3 zones)                              │
 │  Raw zone          Curated zone        Served zone          │
-│  JSON/CSV,    →    Parquet,        →   Snowflake-ready      │
-│  date-part.        incremental         Parquet              │
-│                    partitions                               │
+│  JSON,        →    Delta,          →   Snowflake-ready      │
+│  date-part.        merged on PK,       Parquet              │
+│                    one per source table                     │
 └─────────────────────────────────────────────────────────────┘
                                         │
                                         ▼
