@@ -224,14 +224,14 @@ az group create \
   --location uksouth
 
 az storage account create \
-  --name retailpipelinetfstate \
+  --name retailpipelinetfstatex7k \
   --resource-group retail-pipeline-tfstate-rg \
   --location uksouth \
   --sku Standard_LRS
 
 az storage container create \
   --name tfstate \
-  --account-name retailpipelinetfstate
+  --account-name retailpipelinetfstatex7k
 ```
 
 Then provision all infrastructure:

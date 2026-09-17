@@ -4,7 +4,7 @@
 
 
 CREATE CATALOG IF NOT EXISTS retail_dev
-MANAGED LOCATION 'abfss://managed@retailpipelinedev.dfs.core.windows.net/'
+MANAGED LOCATION 'abfss://managed@retailpipelinedevx7k.dfs.core.windows.net/'
 COMMENT 'Retail pipeline, dev environment. Managed location is deliberately empty: all tables are external. See ADR-014';
 
 
@@ -38,4 +38,4 @@ SHOW SCHEMAS IN retail_dev;
 
 -- Expect the managed container to be empty. Schemas are metadata only, so
 -- nothing above writes a single byte to storage.
-LIST 'abfss://managed@retailpipelinedev.dfs.core.windows.net/';
+LIST 'abfss://managed@retailpipelinedevx7k.dfs.core.windows.net/';

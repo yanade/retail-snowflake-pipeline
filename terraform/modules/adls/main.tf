@@ -2,7 +2,7 @@
 
 resource "azurerm_storage_account" "main" {
   # Azure requires: lowercase, no hyphens, globally unique
-  name                     = lower(replace("${var.project_name}${var.environment}", "-", ""))
+  name                     = lower(replace("${var.project_name}${var.environment}x7k", "-", ""))
   resource_group_name      = var.resource_group_name
   location                 = var.location
   account_tier             = "Standard"
