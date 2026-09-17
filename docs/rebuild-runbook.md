@@ -28,12 +28,28 @@ committed to the repository.
 **Two globally unique storage account names.** Azure storage account names are
 unique across all of Azure, and this project needs two of them.
 
-`retailpipelinedev` is the data lake, created by Terraform, derived as
-`lower(replace(project_name + environment, "-", ""))`. If the previous
-subscription still holds it, `terraform apply` fails. Either destroy the old
-deployment first, or change `project_name` and update the four hardcoded
-references: `transformation/sql/unity_catalog_setup.sql` (x2),
-`docs/architecture-decisions.md` ADR-014 (x2), `ingestion/README.md`.
+`retailpipelinedevx7k` is the data lake, created by Terraform, derived as
+`lower(replace(project_name + environment, "-", "")) + "x7k"`.
+
+The `x7k` suffix exists because of what happened on 2026-09-17. The old
+subscription had been destroyed and then disabled, its resource groups showed
+as empty in the portal, and DNS resolved nothing for either storage account.
+`az storage account check-name` still answered `AlreadyExists` for both. A
+disabled subscription can keep storage account names reserved even when nothing
+is visible in it, and nothing in the portal tells you for how long. Check the
+names before editing any code:
+
+```bash
+az storage account check-name --name retailpipelinedevx7k \
+  --query '{available:nameAvailable, reason:reason}' -o table
+```
+
+If a name is taken, change the suffix in `terraform/modules/adls/main.tf` and
+update the hardcoded references: `transformation/sql/unity_catalog_setup.sql`
+(x2), `ingestion/adf_pipelines/linkedService/ls_adls_dev.json`,
+`docs/architecture-decisions.md` ADR-014 (x2), `ingestion/README.md`. The ADF
+linked service JSON is the one most easily missed, and missing it sends every
+Copy activity to a storage account that does not exist.
 
 `retailpipelinetfstatex7k` is the Terraform state backend, created by hand (see
 step 0), and it lives in its own resource group `retail-pipeline-tfstate-rg`.
@@ -52,9 +68,19 @@ its state to do the destroy.
 ## Prerequisites
 
 - `az`, `terraform`, `psql`, `sqlcmd` (`brew install sqlcmd`), Python venv
-- `az login` against the target subscription
-- `session.sh` recreated, exporting `TF_VAR_sql_admin_password` and
-  `TF_VAR_postgres_admin_password`
+- `az login` against the target subscription. On a machine that has used
+  another account, `az account clear` first, then confirm with
+  `az account show --query '{name:name, subscriptionId:id, user:user.name}' -o table`.
+  Table output hides a key literally called `id`, so alias it.
+- `session.sh` recreated, exporting `TF_VAR_sql_admin_password`,
+  `TF_VAR_postgres_admin_password` and `ARM_SUBSCRIPTION_ID`. Since azurerm
+  4.0 the subscription ID must be given explicitly, so read it from the CLI
+  rather than hardcoding it:
+
+  ```bash
+  export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+  ```
+
 - `.env` present (see `.env.example`)
 
 ---
@@ -66,6 +92,18 @@ its state to do the destroy.
 `backend.tf` stores Terraform state in Azure Storage. That storage account is
 created by hand, outside Terraform, and must exist before `terraform init`.
 On a fresh subscription, skipping this makes step 1 fail immediately.
+
+On a brand new subscription, register the storage resource provider first.
+Nothing else registers it: the portal registers providers when you create
+resources through it, and Terraform registers its own set when it runs, but
+step 0 uses plain `az`. Without it every storage command fails with
+`SubscriptionNotFound`, which reads like the subscription does not exist.
+
+```bash
+az provider register --namespace Microsoft.Storage
+# wait until this prints Registered
+az provider show --namespace Microsoft.Storage --query registrationState -o tsv
+```
 
 ```bash
 az group create \
@@ -89,8 +127,12 @@ name is taken, change it here and in `backend.tf`.
 ### 1. Infrastructure
 
 ```bash
-cd terraform && terraform init && terraform apply
+cd terraform && terraform init -reconfigure && terraform apply
 ```
+
+`-reconfigure` matters when the previous deployment used a different state
+storage account. `.terraform/terraform.tfstate` caches the old backend settings,
+and a plain `init` offers to copy state from a backend that is gone.
 
 Verify: `terraform output` prints the storage account, ADF name, Databricks
 URL and Postgres FQDN.
@@ -204,10 +246,10 @@ data-plane roles, which is deliberate (see ADR notes on file events).
 
 | Name | URL |
 |---|---|
-| `retail_raw` | `abfss://raw@retailpipelinedev.dfs.core.windows.net/` |
-| `retail_curated` | `abfss://curated@retailpipelinedev.dfs.core.windows.net/` |
-| `retail_served` | `abfss://served@retailpipelinedev.dfs.core.windows.net/` |
-| `retail_managed` | `abfss://managed@retailpipelinedev.dfs.core.windows.net/` |
+| `retail_raw` | `abfss://raw@retailpipelinedevx7k.dfs.core.windows.net/` |
+| `retail_curated` | `abfss://curated@retailpipelinedevx7k.dfs.core.windows.net/` |
+| `retail_served` | `abfss://served@retailpipelinedevx7k.dfs.core.windows.net/` |
+| `retail_managed` | `abfss://managed@retailpipelinedevx7k.dfs.core.windows.net/` |
 
 **Catalog and schemas**
 

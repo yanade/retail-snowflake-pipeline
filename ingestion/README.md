@@ -42,7 +42,7 @@ which is what actually gets deployed to the live Data Factory.
 |---|---|---|
 | `ls_postgres_dev` | Azure Database for PostgreSQL | `retail-pipeline-dev-pg.postgres.database.azure.com` / `retail_source`, SQL auth (`pgadmin`), password from Key Vault |
 | `ls_sql_watermark_ctrl` | Azure SQL Database | `retail-pipeline-dev-sql.database.windows.net` / `watermark-db`, SQL auth (`sqladmin`), password from Key Vault |
-| `ls_adls_dev` | ADLS Gen2 | `retailpipelinedev.dfs.core.windows.net` |
+| `ls_adls_dev` | ADLS Gen2 | `retailpipelinedevx7k.dfs.core.windows.net` |
 | `ls_key_vault` | Azure Key Vault | `retail-pipeline-dev-kv` — supplies the two SQL passwords above as secrets (`postgres-admin-password`, `sql-admin-password`) |
 
 ## Datasets

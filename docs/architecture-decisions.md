@@ -762,13 +762,13 @@ went somewhere unintended.
 
 ### Decision
 
-Create a dedicated `managed` container in the `retailpipelinedev` storage
+Create a dedicated `managed` container in the `retailpipelinedevx7k` storage
 account, register it as external location `retail_managed`, and point the
 catalog at it:
 
 ```sql
 CREATE CATALOG retail_dev
-MANAGED LOCATION 'abfss://managed@retailpipelinedev.dfs.core.windows.net/';
+MANAGED LOCATION 'abfss://managed@retailpipelinedevx7k.dfs.core.windows.net/';
 ```
 
 The container is expected to stay empty for the life of the project.
@@ -813,7 +813,21 @@ The cost is one Terraform resource and one external location.
 
 ### Status
 
-Accepted
+Accepted. The Spark 4 assumption below was a prediction when this ADR was
+written, with no workspace to test it against. It was measured on serverless
+compute on 2026-09-17 and holds:
+
+```
+spark version:     4.2.0
+ansi enabled:      true
+session timezone:  Etc/UTC
+```
+
+The serverless runtime currently serves exactly the `pyspark==4.2.0` pinned
+locally, and ANSI is on by default rather than by configuration. Neither is
+guaranteed to stay true: serverless moves on Databricks' schedule, which is the
+reason this ADR argues for declaring `spark.sql.ansi.enabled` explicitly instead
+of relying on the version default.
 
 ### Context
 
