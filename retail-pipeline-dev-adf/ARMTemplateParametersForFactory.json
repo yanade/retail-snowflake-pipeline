@@ -6,7 +6,7 @@
 			"value": "retail-pipeline-dev-adf"
 		},
 		"ls_adls_dev_properties_typeProperties_url": {
-			"value": "https://retailpipelinedev.dfs.core.windows.net"
+			"value": "https://retailpipelinedevx7k.dfs.core.windows.net"
 		},
 		"ls_key_vault_properties_typeProperties_baseUrl": {
 			"value": "https://retail-pipeline-dev-kv.vault.azure.net/"

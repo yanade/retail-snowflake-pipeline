@@ -9,7 +9,7 @@
 		},
 		"ls_adls_dev_properties_typeProperties_url": {
 			"type": "string",
-			"defaultValue": "https://retailpipelinedev.dfs.core.windows.net"
+			"defaultValue": "https://retailpipelinedevx7k.dfs.core.windows.net"
 		},
 		"ls_key_vault_properties_typeProperties_baseUrl": {
 			"type": "string",
