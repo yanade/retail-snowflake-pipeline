@@ -65,10 +65,7 @@ VALUES
     ('exchange_rates',     '1900-01-01', NULL, SYSUTCDATETIME());
 GO
 
--- All 12 retail_oltp tables are ingested. The reference tables are small and
--- cost almost nothing per run, and having them in the raw zone means the dbt
--- dimensions can be built without a second ingestion pass later.
---
+
 -- exchange_rates: lookback_days=0, rates don't arrive late.
 -- orders/order_items/payments: lookback_days=3, late-arriving status updates.
 -- Everything else: lookback_days=1, enough to absorb one missed nightly run.

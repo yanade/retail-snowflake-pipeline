@@ -24,9 +24,6 @@ terraform/.terraform/
 .terraform/
 *.tfvars
 
-# Terraform state holds every attribute in plaintext, including admin
-# passwords. sensitive = true only hides values from CLI output, not from
-# the state file itself. Never commit these.
 *.tfstate
 *.tfstate.*
 crash.log

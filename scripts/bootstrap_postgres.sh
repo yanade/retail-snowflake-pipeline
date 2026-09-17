@@ -4,6 +4,7 @@
 
 set -e  # exit immediately if any command fails
 
+# ask an outside service what my address looks like from outside
 LOCAL_IP=$(curl -s ifconfig.me)
 echo "Adding firewall rule for IP: $LOCAL_IP..."
 
