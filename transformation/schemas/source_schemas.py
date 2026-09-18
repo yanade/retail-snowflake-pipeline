@@ -217,3 +217,22 @@ def to_read_schema(target_schema: StructType) -> StructType:
         A new StructType with the same field names, all as nullable strings.
     """
     return StructType([StructField(f.name, StringType(), True) for f in target_schema.fields])
+
+def get_source_schema(table: str) -> StructType:
+    """
+    Look up a table's target schema, failing loudly on an unknown name.
+
+    Args:
+        table: Source table name.
+
+    Returns:
+        The table's StructType from SOURCE_SCHEMAS.
+
+    Raises:
+        ValueError: If the table has no declared schema.
+    """
+    if table not in SOURCE_SCHEMAS:
+        raise ValueError(
+            f"Unknown source table '{table}'. Expected one of: {sorted(SOURCE_SCHEMAS)}"
+        )
+    return SOURCE_SCHEMAS[table]

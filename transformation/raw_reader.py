@@ -7,7 +7,7 @@ from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import StringType, StructField
 
-from transformation.schemas.source_schemas import SOURCE_SCHEMAS, to_read_schema
+from transformation.schemas.source_schemas import get_source_schema, to_read_schema
 
 CORRUPT_RECORD_COLUMN = "_corrupt_record"  # the whole original line, when it isn't valid JSON
 SOURCE_FILE_COLUMN = "_source_file"        # which raw file, and so which ADF run, a row came from
@@ -34,13 +34,8 @@ def read_raw(spark: SparkSession, table: str, raw_root: str) -> DataFrame:
     Raises:
         ValueError: If the table has no declared schema.
     """
-    if table not in SOURCE_SCHEMAS:
-        raise ValueError(
-            f"Unknown source table '{table}'. Expected one of: {sorted(SOURCE_SCHEMAS)}"
-        )
-
     # Spark only fills the corrupt-record column if it is part of the schema
-    read_schema = to_read_schema(SOURCE_SCHEMAS[table]).add(
+    read_schema = to_read_schema(get_source_schema(table)).add(
         StructField(CORRUPT_RECORD_COLUMN, StringType(), True)
     )
 

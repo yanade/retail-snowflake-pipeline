@@ -121,3 +121,22 @@ _CONFIGS: tuple[TableConfig, ...] = (
 
 
 TABLE_CONFIGS: dict[str, TableConfig] = {c.source_table: c for c in _CONFIGS}
+
+def get_table_config(table: str) -> TableConfig:
+    """
+    Look up a table's config, failing loudly on an unknown name.
+
+    Args:
+        table: Source table name.
+
+    Returns:
+        The table's TableConfig.
+
+    Raises:
+        ValueError: If the table has no config.
+    """
+    if table not in TABLE_CONFIGS:
+        raise ValueError(
+            f"Unknown source table '{table}'. Expected one of: {sorted(TABLE_CONFIGS)}"
+        )
+    return TABLE_CONFIGS[table]

@@ -9,7 +9,7 @@ strings: the reprocess DAG and the dashboard match on them.
 from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
 
-from transformation.config.table_config import TABLE_CONFIGS, TableConfig
+from transformation.config.table_config import TableConfig, get_table_config
 from transformation.raw_reader import CORRUPT_RECORD_COLUMN
 from transformation.type_casting import CAST_ERRORS_COLUMN
 
@@ -81,14 +81,9 @@ def apply_dq_rules(df: DataFrame, table: str) -> DataFrame:
     Raises:
         ValueError: If the table has no config.
     """
-    if table not in TABLE_CONFIGS:
-        raise ValueError(
-            f"Unknown source table '{table}'. Expected one of: {sorted(TABLE_CONFIGS)}"
-        )
-
     all_reasons = F.concat(
         _cast_failure_reasons(),
-        F.array(*_rule_checks(TABLE_CONFIGS[table])),
+        F.array(*_rule_checks(get_table_config(table))),
     )
 
     return df.withColumn(

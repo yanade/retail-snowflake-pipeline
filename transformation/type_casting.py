@@ -11,7 +11,7 @@ from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
 from pyspark.sql.types import StructField
 
-from transformation.schemas.source_schemas import SOURCE_SCHEMAS
+from transformation.schemas.source_schemas import get_source_schema
 
 CAST_ERRORS_COLUMN = "_cast_errors"  # names of the columns whose value was present but would not convert
 
@@ -63,12 +63,7 @@ def cast_to_target(df: DataFrame, table: str) -> DataFrame:
     Raises:
         ValueError: If the table has no declared schema.
     """
-    if table not in SOURCE_SCHEMAS:
-        raise ValueError(
-            f"Unknown source table '{table}'. Expected one of: {sorted(SOURCE_SCHEMAS)}"
-        )
-
-    target = SOURCE_SCHEMAS[table]
+    target = get_source_schema(table)
     source_columns = set(target.fieldNames())
     metadata_columns = [c for c in df.columns if c not in source_columns]  # _corrupt_record, _source_file
 
