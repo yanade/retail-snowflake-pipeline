@@ -22,7 +22,7 @@
 terraform {
   backend "azurerm" {
     resource_group_name  = "retail-pipeline-tfstate-rg" # resource group holding the state storage
-    storage_account_name = "retailpipelinetfstatex7k"      # globally unique, no hyphens
+    storage_account_name = "retailpipelinetfstatex7k"   # globally unique, no hyphens
     container_name       = "tfstate"                    # blob container inside the storage account
     key                  = "retail-pipeline.tfstate"    # filename of the state file
   }
