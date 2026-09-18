@@ -954,3 +954,92 @@ behaviour that matters independent of the cluster.
   version actually served, and whether ANSI is enabled there. If the project
   ends up on classic compute pinned to Spark 3.5, this decision needs
   revisiting.
+
+  ---
+
+  ## ADR-016: Capturing the Dead-Letter Raw Payload Before Type Conversion
+
+### Status
+
+Accepted
+
+### Context
+
+`raw_payload` must show what actually arrived, for investigation and for the
+`reprocess_dead_letter` DAG. But `try_cast` (ADR-015) turns an unconvertible
+value into NULL, so a payload built after casting shows `null` for exactly
+the rows rejected because of that value. A malformed line is worse: all
+columns are NULL, so its payload would be `{}`.
+
+### Decision
+
+`add_raw_payload()` in `transformation/raw_payload.py` runs between
+`read_raw()` and `cast_to_target()` and adds `_raw_payload` as a JSON string:
+
+- malformed line: the original text from `_corrupt_record`
+- otherwise: the source columns via `to_json`, keeping NULLs as `null`
+  (`ignoreNullFields` disabled)
+
+It passes through casting unchanged, is dropped before the MERGE, and is
+stored only in dead-letter.
+
+### Alternatives Considered
+
+- **Build it at dead-letter time:** loses unconvertible values.
+- **Inside `read_raw()` or `cast_to_target()`:** mixes two responsibilities
+  into one function.
+- **Re-read the file via `_source_file`:** exact bytes, but costly, and the
+  file may be gone by the time someone reprocesses.
+
+### Rationale
+
+Evidence must be captured at the last point it is still true.
+
+### Consequences
+
+- Faithful to values, not byte-identical: numbers appear as strings. Exact
+  bytes remain recoverable via `_source_file`.
+- Contains personal data, so dead-letter needs source-level access control.
+
+---
+
+## ADR-017: Pinning the Spark Session Time Zone to UTC
+
+### Status
+
+Accepted
+
+### Context
+
+`to_date()` on a timestamp picks a calendar day using
+`spark.sql.session.timeZone`, which defaults to the machine's zone. The
+developer laptop runs Europe/London; Databricks serverless runs `Etc/UTC`
+(measured 2026-09-17). `2026-08-26T23:30:00Z` is the 26th in UTC and the 27th
+in London during summer. The FX join (ADR-012) matches
+`to_date(order_date)` to `rate_date`, so the two environments would pick
+different days' rates and produce different USD totals, with no error.
+
+### Decision
+
+`REQUIRED_CONFIGS` in `transformation/spark_session.py` sets
+`spark.sql.session.timeZone = UTC`. `build_local_spark()` applies it locally,
+and `apply_required_configs()` applies it to the session Databricks provides.
+
+### Alternatives Considered
+
+- **Europe/London**, because the business is UK-based: daylight saving moves
+  day boundaries in March and October, so the same pipeline would give
+  different answers depending on the time of year.
+- **Leave the default:** local tests and production silently disagree.
+
+### Rationale
+
+A setting that changes results must be declared, not inherited. UTC matches
+how the source stores `timestamptz`, how ADF stamps watermarks, and has no
+daylight saving transitions.
+
+### Consequences
+
+- Day boundaries in curated and served are UTC days. Reporting by UK local
+  day must convert explicitly, in the served layer or dbt.
+- `test_timestamp_maps_to_utc_calendar_day` fails if the setting is lost.
