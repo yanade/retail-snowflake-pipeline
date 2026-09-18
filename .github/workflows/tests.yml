@@ -1,0 +1,37 @@
+name: tests
+
+on:
+  push:
+    branches: [main]      # every push to main
+  pull_request:           # every pull request, whatever branch
+  workflow_dispatch:      # adds a "Run workflow" button in the Actions tab
+
+permissions:
+  contents: read          # the job only needs to read the code, nothing more
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15   # fail loudly instead of hanging for GitHub's 6-hour default
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip       # reuse downloaded packages between runs, keyed on requirements.txt
+
+      - name: Set up Java for PySpark
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"   # PySpark runs on the JVM; same major version as your laptop
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest -v

@@ -1,0 +1,43 @@
+name: terraform
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform.yml"
+  pull_request:
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: terraform   # every run: step below executes inside terraform/
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.13.3"   # same version as your laptop
+
+      - name: Check formatting
+        run: terraform fmt -check -recursive
+
+      - name: Initialise without the remote backend
+        run: terraform init -backend=false   # providers only, no Azure credentials needed
+
+      - name: Validate configuration
+        run: terraform validate
