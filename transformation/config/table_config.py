@@ -54,7 +54,7 @@ _CONFIGS: tuple[TableConfig, ...] = (
     TableConfig(
         source_table="order_items",
         primary_key=["order_item_id"],
-        not_null=["product_id", "unit_price"],
+        not_null=["product_id", "unit_price", "quantity"],
         non_zero=["quantity"],
     ),
 
