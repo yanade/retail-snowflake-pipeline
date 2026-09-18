@@ -1,8 +1,7 @@
 requests
 python-dotenv
 pytest
-pandas
-openpyxl
+
 psycopg[binary]
 
 # Transformation layer. Versions pinned per ADR-015: delta-spark 4.4.0
