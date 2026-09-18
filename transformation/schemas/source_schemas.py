@@ -201,3 +201,19 @@ SOURCE_SCHEMAS: dict[str, StructType] = {
     ),
 
 }
+
+def to_read_schema(target_schema: StructType) -> StructType:
+    """
+    Derive the raw-zone read schema from a target schema.
+
+    Every field keeps its name and position but becomes a nullable string, so
+    the JSON reader never converts, and never silently NULLs, a value it cannot
+    parse. Conversion to the target type happens later, with try_cast.
+
+    Args:
+        target_schema: A schema from SOURCE_SCHEMAS.
+
+    Returns:
+        A new StructType with the same field names, all as nullable strings.
+    """
+    return StructType([StructField(f.name, StringType(), True) for f in target_schema.fields])
