@@ -14,6 +14,7 @@ from transformation.schemas.source_schemas import get_source_schema
 
 TARGET_ALIAS = "target"
 SOURCE_ALIAS = "source"
+CHECKPOINTS_DIRECTORY = "_checkpoints"
 
 
 def curated_path(curated_root: str, table: str) -> str:
@@ -95,3 +96,16 @@ def merge_into_curated(
     )
 
     return path
+
+def checkpoint_path(curated_root: str, table: str) -> str:
+    """
+    Location of one table's Auto Loader checkpoint.
+
+    Args:
+        curated_root: Root of the curated zone.
+        table: Source table name.
+
+    Returns:
+        The checkpoint path from ADR-010.
+    """
+    return f"{curated_root}/{CHECKPOINTS_DIRECTORY}/{table}"
