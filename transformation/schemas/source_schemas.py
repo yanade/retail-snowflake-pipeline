@@ -226,7 +226,7 @@ def get_source_schema(table: str) -> StructType:
         table: Source table name.
 
     Returns:
-        The table's StructType from SOURCE_SCHEMAS.
+        A copy of the table's StructType from SOURCE_SCHEMAS.
 
     Raises:
         ValueError: If the table has no declared schema.
@@ -235,4 +235,7 @@ def get_source_schema(table: str) -> StructType:
         raise ValueError(
             f"Unknown source table '{table}'. Expected one of: {sorted(SOURCE_SCHEMAS)}"
         )
-    return SOURCE_SCHEMAS[table]
+
+    # A copy, because StructType.add() mutates in place: handing out the shared
+    # object would let one caller corrupt the registry for every other caller.
+    return StructType(list(SOURCE_SCHEMAS[table].fields))
