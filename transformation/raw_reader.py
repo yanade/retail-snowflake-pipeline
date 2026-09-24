@@ -52,9 +52,7 @@ def read_raw(spark: SparkSession, table: str, raw_root: str) -> DataFrame:
         ValueError: If the table has no declared schema.
     """
     # Spark only fills the corrupt-record column if it is part of the schema
-    read_schema = to_read_schema(get_source_schema(table)).add(
-        StructField(CORRUPT_RECORD_COLUMN, StringType(), True)
-    )
+    read_schema = _read_schema(table)
 
     df = (
         spark.read.schema(read_schema)
