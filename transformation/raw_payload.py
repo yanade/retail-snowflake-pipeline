@@ -11,10 +11,10 @@ Pipeline order: read_raw() -> add_raw_payload() -> cast_to_target()
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
-from transformation.raw_reader import CORRUPT_RECORD_COLUMN, SOURCE_FILE_COLUMN
+from transformation.raw_reader import CORRUPT_RECORD_COLUMN, RESCUED_DATA_COLUMN, SOURCE_FILE_COLUMN
 
 RAW_PAYLOAD_COLUMN = "_raw_payload"  # the original record as JSON text, for dead-letter
-READER_METADATA_COLUMNS = (CORRUPT_RECORD_COLUMN, SOURCE_FILE_COLUMN)  # added by read_raw(), not source data
+READER_METADATA_COLUMNS = (CORRUPT_RECORD_COLUMN, RESCUED_DATA_COLUMN, SOURCE_FILE_COLUMN)  # added by read_raw(), not source data
 
 
 def add_raw_payload(df: DataFrame) -> DataFrame:
