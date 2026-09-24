@@ -39,7 +39,22 @@ dbutils.widgets.dropdown("reader", "batch", ["batch", "stream"])
 
 raw_root = dbutils.widgets.get("raw_root")
 curated_root = dbutils.widgets.get("curated_root")
+reader = dbutils.widgets.get("reader")# No defaults: a missing parameter must fail, not quietly run against dev
+dbutils.widgets.text("raw_root", "")
+dbutils.widgets.text("curated_root", "")
+dbutils.widgets.text("tables", "")
+dbutils.widgets.text("reader", "")
+
+raw_root = dbutils.widgets.get("raw_root")
+curated_root = dbutils.widgets.get("curated_root")
 reader = dbutils.widgets.get("reader")
+
+if not raw_root or not curated_root:
+    raise ValueError("raw_root and curated_root are required, they decide which environment is written")
+
+if reader not in ("batch", "stream"):
+    raise ValueError(f"reader must be 'batch' or 'stream', got {reader!r}")
+
 
 requested = [t.strip() for t in dbutils.widgets.get("tables").split(",") if t.strip()]
 tables = requested or sorted(TABLE_CONFIGS)  # the registry is the source of truth
