@@ -10,7 +10,7 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import StringType, StructField
 
 from transformation.raw_payload import RAW_PAYLOAD_COLUMN, add_raw_payload
-from transformation.raw_reader import CORRUPT_RECORD_COLUMN, SOURCE_FILE_COLUMN
+from transformation.raw_reader import CORRUPT_RECORD_COLUMN, RESCUED_DATA_COLUMN,  SOURCE_FILE_COLUMN
 from transformation.schemas.source_schemas import SOURCE_SCHEMAS, to_read_schema
 from transformation.type_casting import CAST_ERRORS_COLUMN, cast_to_target
 
@@ -76,3 +76,14 @@ def test_payload_survives_casting(spark: SparkSession) -> None:
     assert row["customer_id"] is None
     assert row[CAST_ERRORS_COLUMN] == ["customer_id"]
     assert json.loads(row[RAW_PAYLOAD_COLUMN])["customer_id"] == "abc"
+
+
+def test_payload_excludes_the_rescued_data_column(spark: SparkSession) -> None:
+    """_rescued_data describes the read, like _corrupt_record, not the record."""
+    raw = _raw_customers(spark, [{"customer_id": "1"}]).withColumn(
+        RESCUED_DATA_COLUMN, F.lit('{"unexpected":"x"}')
+    )
+
+    payload = json.loads(add_raw_payload(raw).first()[RAW_PAYLOAD_COLUMN])
+
+    assert RESCUED_DATA_COLUMN not in payload
