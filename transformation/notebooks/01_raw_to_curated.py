@@ -44,6 +44,9 @@ reader = dbutils.widgets.get("reader")
 requested = [t.strip() for t in dbutils.widgets.get("tables").split(",") if t.strip()]
 tables = requested or sorted(TABLE_CONFIGS)  # the registry is the source of truth
 
+# State the configuration, so a run's own output says what it did
+print(f"reader={reader}, raw_root={raw_root}, curated_root={curated_root}, tables={len(tables)}")
+
 apply_required_configs(spark)  # ANSI and UTC, ADR-015 and ADR-017
 
 # COMMAND ----------
