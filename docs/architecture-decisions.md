@@ -955,9 +955,9 @@ behaviour that matters independent of the cluster.
   ends up on classic compute pinned to Spark 3.5, this decision needs
   revisiting.
 
-  ---
+---
 
-  ## ADR-016: Capturing the Dead-Letter Raw Payload Before Type Conversion
+## ADR-016: Capturing the Dead-Letter Raw Payload Before Type Conversion
 
 ### Status
 
@@ -1043,3 +1043,65 @@ daylight saving transitions.
 - Day boundaries in curated and served are UTC days. Reporting by UK local
   day must convert explicitly, in the served layer or dbt.
 - `test_timestamp_maps_to_utc_calendar_day` fails if the setting is lost.
+
+---
+
+## ADR-018: Dimension and Status History via dbt Snapshots, Not in Curated
+
+### Status
+
+Accepted
+
+### Context
+
+Curated is a Type 1 mirror of the source: one row per key, latest state
+(ADR-010). A MERGE overwrites the previous state, so questions such as how a
+customer's status changed, or how many orders were in a given status on a
+given date, cannot be answered from it.
+
+### Decision
+
+History is modelled with `dbt snapshot` (strategy `timestamp`, `updated_at`)
+over curated tables. A table gets a snapshot when it has a mutable attribute
+that a business question can ask about "as of" a date. Events do not: a fact
+row carries its own date and its values as they were at the time, so
+`fact_sales.unit_price_original` already answers "what price was charged".
+
+By that rule the candidates are `customers`, `orders`, `products` and
+`payments`; `exchange_rates` is a fact and never needs one. Snapshots are added
+as questions appear, starting with `customers` and `orders`.
+
+Snapshots produce interval rows (`dbt_valid_from`, `dbt_valid_to`), so a
+point-in-time question is a range predicate:
+
+    where <date> >= dbt_valid_from and (dbt_valid_to is null or <date> < dbt_valid_to)
+
+They run in the same Airflow DAG as the transformation, immediately after it
+and before the marts. Curated is unchanged.
+
+### Alternatives Considered
+
+- **Append-only or SCD2 curated:** every downstream model would then have to
+  filter for the current version, and one forgotten filter doubles revenue
+  silently. With dbt in the same DAG it also captures no extra versions.
+- **Periodic snapshot fact (one row per order per day):** simpler queries, but
+  volume grows as orders times days for answers the interval model already gives.
+- **Accumulating snapshot (milestone columns):** compact, but assumes a
+  forward-only flow, which `CANCELLED` and `RETURNED` break.
+- **Delta Change Data Feed on curated:** free change log, but bounded by table
+  retention and not a modelled history.
+
+### Rationale
+
+One mechanism answers every "as of" question, and curated stays a mirror that
+cannot be misread.
+
+### Consequences
+
+- The snapshot must run on every pipeline run. A skipped run loses the versions
+  that existed between runs.
+- Changes within one run are never captured: the watermark delivers the latest
+  state of a row, not every change. A full change log would require CDC on the
+  source, which is out of scope.
+- Adding a snapshot later is cheap: history can be backfilled from raw, so the
+  initial set does not have to be complete.
