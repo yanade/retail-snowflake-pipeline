@@ -194,7 +194,7 @@ retail-snowflake-pipeline/
 - [ ] DVT — validation suite
 - [ ] Airflow — main + reprocess DAGs
 - [ ] Streamlit — data quality dashboard
-- [ ] GitHub Actions CI
+- [x] GitHub Actions CI
 
 ---
 
