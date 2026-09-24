@@ -3,7 +3,9 @@ import pytest
 
 from generate_data import ORDER_STATUSES, PAYMENT_STATUSES
 from transformation.config.table_config import TABLE_CONFIGS
-from transformation.schemas.source_schemas import SOURCE_SCHEMAS
+from pyspark.sql.types import StringType, StructField
+
+from transformation.schemas.source_schemas import SOURCE_SCHEMAS, get_source_schema
 
 
 INJECTED_BAD_PAYMENT_STATUS = "SETTLED_UNKNOWN"
@@ -64,3 +66,14 @@ def test_payment_status_whitelist_excludes_only_the_injected_value():
     whitelist = set(TABLE_CONFIGS["payments"].allowed_values["payment_status"])
 
     assert set(PAYMENT_STATUSES) - whitelist == {INJECTED_BAD_PAYMENT_STATUS}
+
+
+# ── registry safety ───
+
+def test_get_source_schema_returns_a_copy():
+    """StructType.add() mutates, so the registry must never hand out its own object."""
+    before = len(SOURCE_SCHEMAS["customers"].fields)
+
+    get_source_schema("customers").add(StructField("_scratch", StringType(), True))
+
+    assert len(SOURCE_SCHEMAS["customers"].fields) == before
