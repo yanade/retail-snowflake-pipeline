@@ -31,15 +31,7 @@ from transformation.spark_session import apply_required_configs
 
 # COMMAND ----------
 
-# Parameters, so Airflow can pass different zones, a subset of tables or a reader
-dbutils.widgets.text("raw_root", "abfss://raw@retailpipelinedevx7k.dfs.core.windows.net")
-dbutils.widgets.text("curated_root", "abfss://curated@retailpipelinedevx7k.dfs.core.windows.net")
-dbutils.widgets.text("tables", "")
-dbutils.widgets.dropdown("reader", "batch", ["batch", "stream"])
-
-raw_root = dbutils.widgets.get("raw_root")
-curated_root = dbutils.widgets.get("curated_root")
-reader = dbutils.widgets.get("reader")# No defaults: a missing parameter must fail, not quietly run against dev
+# No defaults: a missing parameter must fail, not quietly run against dev
 dbutils.widgets.text("raw_root", "")
 dbutils.widgets.text("curated_root", "")
 dbutils.widgets.text("tables", "")
@@ -55,7 +47,6 @@ if not raw_root or not curated_root:
 if reader not in ("batch", "stream"):
     raise ValueError(f"reader must be 'batch' or 'stream', got {reader!r}")
 
-
 requested = [t.strip() for t in dbutils.widgets.get("tables").split(",") if t.strip()]
 tables = requested or sorted(TABLE_CONFIGS)  # the registry is the source of truth
 
@@ -63,6 +54,7 @@ tables = requested or sorted(TABLE_CONFIGS)  # the registry is the source of tru
 print(f"reader={reader}, raw_root={raw_root}, curated_root={curated_root}, tables={len(tables)}")
 
 apply_required_configs(spark)  # ANSI and UTC, ADR-015 and ADR-017
+
 
 # COMMAND ----------
 
