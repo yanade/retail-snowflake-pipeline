@@ -188,7 +188,7 @@ retail-snowflake-pipeline/
 - [x] ADLS Gen2 — 3-zone storage with date partitioning
 - [x] ADF — watermark-based incremental pipeline
 - [x] Databricks — PySpark incremental transformation
-- [ ] Dead-letter handler
+- [x] Dead-letter handler
 - [ ] Snowflake — star schema
 - [ ] dbt — staging, intermediate, mart models + tests
 - [ ] DVT — validation suite
