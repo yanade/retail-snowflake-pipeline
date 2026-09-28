@@ -119,6 +119,14 @@ Key Vault access policy is provisioned as a standalone resource in `terraform/ma
 
 ## ADR-004: Cost Management — Destroy After Every Session
 
+### Status
+
+Superseded by ADR-021 on 2026-09-28. The rule held while the stack was Azure
+only and everything in it billed by the hour. It stopped being worth the effort
+once Snowflake, a storage integration and an Entra service principal joined it:
+the rebuild is now a 40 minute runbook plus a consent flow, paid every session
+to save idle compute that suspends itself anyway.
+
 ### Decision
 Run `terraform destroy` at the end of every dev session and `terraform apply` at the start of the next. Infrastructure is treated as ephemeral during development.
 
@@ -455,6 +463,11 @@ so adding a column to one source table cannot disturb another.
 
 Accepted
 
+Amended on 2026-09-28 by ADR-020. The grain rule stands unchanged, but its
+subject moves: there is no fact file in the served zone. Served carries
+source-shaped tables, and one row per `order_item_id` is the grain of
+`fact_sales` in dbt.
+
 ### Context
 
 Grain is the single most consequential modelling decision, and the majority
@@ -556,6 +569,23 @@ Consequences:
 ### Status
 
 Accepted
+
+Amended on 2026-09-28 by ADR-020. FX conversion moves from Databricks to dbt,
+so the Databricks stage no longer joins `exchange_rates` and cannot detect a
+missing rate. The cross-rate formula and the rule against loading a NULL
+measure are unchanged.
+
+Missing rates are caught in two places instead. They are prevented:
+`bootstrap_fx_rates.sh` and `simulate_source_changes.sh` already fail when any
+order lacks a rate for its date, so a missing rate is an operational error and
+not an expected condition. And they are contained: in dbt the FX join splits
+into two models from one source, rows with a rate feeding `fact_sales` and rows
+without landing in a rejected table. A dbt test cannot do this, because a test
+fails a run rather than routing a row.
+
+Dead-letter therefore has two homes, one per stage: the Delta table for
+ingestion rejects, a Snowflake table for modelling rejects. Both surface in the
+dashboard.
 
 ### Context
 
@@ -1050,7 +1080,19 @@ daylight saving transitions.
 
 ### Status
 
-Accepted
+Superseded by ADR-020 on 2026-09-28.
+
+Snapshots cannot run over curated: dbt uses the Snowflake adapter and curated
+is Delta in ADLS. They could only run over `ecommerce_db.raw`, and under
+ADR-020 raw is an append-only change log that already holds every delivered
+version of a row. An SCD2 interval is then a window function over it, so a
+snapshot would be a second history mechanism on top of the first, carrying the
+same limitation that nothing before the pipeline exists.
+
+What survives is the criterion in the Decision below: a table gets a history
+model when it has a mutable attribute that a business question can ask about
+"as of" a date. By that rule the candidates are still `customers`, `orders`,
+`products` and `payments`, and `exchange_rates` never needs one.
 
 ### Context
 
@@ -1105,3 +1147,228 @@ cannot be misread.
   source, which is out of scope.
 - Adding a snapshot later is cheap: history can be backfilled from raw, so the
   initial set does not have to be complete.
+
+## ADR-019: ADLS to Snowflake via Storage Integration, Stage and COPY INTO
+
+### Status
+
+Accepted
+
+### Context
+
+Databricks writes the served zone to ADLS as Parquet, partitioned
+`year=/month=/day=`. Snowflake has to receive it. Airflow already owns
+orchestration end to end, and every load must be idempotent and auditable
+because DVT runs against each increment.
+
+### Decision
+
+A storage integration authenticates Snowflake to ADLS through a service
+principal in our Entra tenant, not a key or a SAS token, and holds Storage Blob
+Data Reader on the `served` container alone. An external stage points at that
+container, and `COPY INTO` loads the files named in the run's manifest
+(ADR-020) into `ecommerce_db.raw`. Airflow issues the COPY, records its
+per-file results in `pipeline_audit`, and only then runs DVT and dbt.
+
+Snowflake remembers which files a table has already loaded and skips them, so
+re-running the DAG is a no-op. That record expires after 64 days, which the
+manifest makes irrelevant: a run only ever names its own files.
+
+### Alternatives Considered
+
+- **External tables:** no data movement, but every dbt model then scans ADLS,
+  and partition metadata becomes another thing to refresh.
+- **Snowpipe:** near real time, but the trigger lives in Azure, so the DAG
+  cannot tell when a load finished without polling.
+- **Databricks Snowflake connector:** fewer moving parts, but it couples the
+  transformation tool to the warehouse and puts Snowflake credentials in
+  Databricks.
+- **SAS token on the stage:** no Azure role assignment needed, but the secret
+  then lives inside the stage definition and expires.
+
+### Rationale
+
+Each tool keeps one job, Airflow keeps one place to look when a run fails, and
+idempotency comes from the loader rather than from code we maintain.
+
+### Consequences
+
+- `COPY INTO` appends. Combined with the increment defined in ADR-020, this
+  makes `ecommerce_db.raw` an append-only **change log rather than a mirror**:
+  a key reappears with every change it undergoes. Deduplication therefore
+  belongs to dbt's staging models, and no model may read `raw` directly.
+- `COPY INTO` returns per-file results, which is what `pipeline_audit` records.
+- Reloading files requires `FORCE`, so it is a deliberate, logged act.
+- The integration spans two clouds, but all three parts are codeable:
+  `azuread_service_principal` for Snowflake's fixed client id,
+  `azurerm_role_assignment`, and the Snowflake provider's storage integration.
+  Only the first run is manual, while that client id is still unknown.
+- The stage is read only. Unloading from Snowflake back to ADLS would need
+  Storage Blob Data Contributor.
+
+## ADR-020: The Served Zone Contract
+
+### Status
+
+Accepted
+
+### Context
+
+Curated is a Delta mirror of the source, maintained by MERGE, with deletion
+vectors enabled. Snowflake reads from the served zone (ADR-019). What served
+contains, and what counts as one increment, determines what dbt must do and
+what DVT can compare. Getting it wrong is not visible until a number in a
+report is wrong.
+
+### Decision
+
+**Shape.** One directory per curated table, Parquet, in source shape. All
+twelve, including those no mart uses yet: narrowing the set would couple
+Databricks to dbt's model list. No joins and no derived columns, so the star
+schema and the FX conversion both belong to dbt.
+
+**Increment.** Rows are selected by Delta **version**, not by the source's
+`updated_at`, and read through Change Data Feed, keeping `insert` and
+`update_postimage`. `updated_at` is event time; a row delivered late by ADF's
+lookback window (three days for orders) arrives in curated carrying an older
+`updated_at`, and an `updated_at` watermark would skip it permanently. A Delta
+version is processing time and cannot skip anything.
+
+**Partitioning.** `served/<table>/year=/month=/day=` by run date.
+
+**Manifest.** A failed Spark write leaves its finished task files in the
+folder with no commit marker, and a later overwrite does not remove them.
+Spark skips them; COPY INTO loads them. After each successful write, the
+export records `inputFiles()` and the row count next to the table's Delta
+version, and COPY INTO names exactly those files with `FILES = (...)`. A whole
+partition is never loaded.
+
+**Immutability.** A written file is never rewritten or deleted before it is
+loaded. Two runs on one day leave two sets of files. The manifest and the
+audit record refer to files by name.
+
+**History.** No `dbt snapshot`. Because raw is a change log, an SCD2 interval
+is derived from it directly, after deduplicating on `(<pk>, updated_at)`:
+
+    dbt_valid_from = updated_at
+    dbt_valid_to   = lead(updated_at) over (partition by <pk> order by updated_at)
+
+The history is at pipeline cadence: states that changed twice between two ADF
+runs appear once. ADR-018's criterion for which tables need history is
+unchanged.
+
+**Schema evolution.** None, in either direction. `MATCH_BY_COLUMN_NAME`
+ignores unmatched file columns and writes NULL for unmatched table columns,
+both without error, so drift is silent. A check compares `source_schemas.py`
+field names against `INFORMATION_SCHEMA.COLUMNS` and fails on a difference.
+Names only: a type change is a rebuild.
+
+**Deletes.** Out of scope. The source never deletes and curated is built from
+upserts only. Divergence would be caught by DVT's key comparison. A full
+answer needs CDC on the source.
+
+**Raw tables.** Twelve typed tables, written by hand with unquoted names, not
+generated: a template from `INFER_SCHEMA` creates quoted lower-case names that
+every model would have to quote. The schema check above catches drift from
+any cause, including a table edited in Snowsight. Timestamps are
+`TIMESTAMP_NTZ` holding UTC.
+
+### Alternatives Considered
+
+- **Star built in Spark:** moves grain and business rules out of dbt, losing
+  declarative tests, lineage and docs.
+- **Watermark on `updated_at`:** one concept across every layer, but it
+  discards the guarantee ADF's lookback window was built to provide.
+- **Snowflake reading curated's Delta files:** no export step, but deletion
+  vectors leave superseded rows inside live files, which only a Delta reader
+  skips.
+- **Loading the whole partition:** a simpler COPY, but it loads files from
+  failed writes.
+- **Full dump each run:** does not avoid deduplication, only adds volume.
+- **MERGE into Snowflake raw:** raw stays a mirror, but COPY INTO cannot merge,
+  so it needs a staging table and a second statement.
+- **dbt snapshots over raw:** a named and familiar tool, but a second history
+  mechanism over data that already records every version.
+- **VARIANT column instead of typed tables:** no DDL to maintain, but Parquet
+  already carries types, and a bad value becomes a silent NULL inside a model.
+
+### Rationale
+
+Each tool keeps one job, and every property the pipeline claims is traceable to
+the component that provides it.
+
+### Consequences
+
+- Delivery is **at least once up to raw and exactly once at the marts**. The
+  Parquet write and the version advance are separate transactions and cannot be
+  made one. The deduplication in dbt's staging models is what makes the second
+  half true, so removing it doubles revenue on any retry.
+- COPY INTO's `rows_loaded` must equal the manifest's row count. A mismatch is
+  FAIL in `pipeline_audit`.
+- DVT cannot compare the source against `raw`: counts will not match by
+  construction. It compares source keys against the deduplicated staging
+  layer, and every missing key must appear as an unprocessed `source_key` in
+  dead-letter. The dead-letter row count is not the expected difference: one
+  key can have several records, and a key whose newest version was rejected
+  keeps its older version in staging.
+- Change Data Feed must be enabled per curated table, sees nothing from before
+  it was enabled, and is bounded by Delta log retention. A long gap between
+  runs breaks the chain and requires a full reload of that table.
+- The watermark store holds a Delta version and the manifest per table, and
+  assumes a single writer, which holds while Airflow runs with
+  `max_active_runs=1`.
+- The account time zone is America/Los_Angeles. The pipeline user must run with
+  `TIMEZONE = 'UTC'`, or comparing an NTZ column with `CURRENT_TIMESTAMP()`
+  shifts by seven or eight hours.
+- Raw as a change log is the project's least intuitive property. It has to be
+  stated in the README, not only here.
+
+## ADR-021: Cost Control by Suspending Compute, Not Destroying the Stack
+
+### Status
+
+Accepted
+
+### Context
+
+ADR-004 destroyed and rebuilt the whole stack after every session. That was
+cheap while the stack was Terraform only. It is not cheap now: Snowflake's
+storage integration needs an Entra consent flow and a role assignment that
+Terraform cannot yet reproduce, and the rebuild runbook runs 40 minutes.
+
+Meanwhile every expensive component learned to idle. The cost of keeping the
+stack is no longer the cost of leaving it running.
+
+### Decision
+
+The stack stays. Cost is controlled per component instead:
+
+| Component | Control |
+|---|---|
+| Snowflake warehouse | `AUTO_SUSPEND = 60`, `INITIALLY_SUSPENDED` |
+| Snowflake account | resource monitor, 50 credits monthly, suspend at 100% |
+| Databricks | serverless, stops when a job ends |
+| PostgreSQL Flexible Server | stopped by hand between sessions |
+| Azure SQL (watermark) | serverless, auto-pauses after 60 idle minutes |
+| ADLS, Key Vault, ADF | storage and definitions, negligible when idle |
+
+Ending a session means stopping PostgreSQL. Nothing else needs an action.
+
+### Alternatives Considered
+
+- **Keep ADR-004:** correct on cost, but the Snowflake consent flow makes the
+  rebuild manual, so the tax is paid in attention rather than in money.
+- **Destroy Azure, keep Snowflake:** the two are joined by a role assignment on
+  a storage account, so destroying one breaks the other silently.
+
+### Rationale
+
+Idle compute now suspends itself. Paying a 40 minute rebuild to avoid pennies
+is a worse trade than watching a resource monitor.
+
+### Consequences
+
+- The monthly floor is no longer zero. Storage and a stopped database bill.
+- `rebuild-runbook.md` becomes a recovery procedure rather than a routine one.
+- Cost discipline now depends on the resource monitor firing, which makes its
+  `NOTIFY_USERS` recipient a real dependency rather than decoration.
