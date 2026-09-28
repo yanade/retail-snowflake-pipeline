@@ -32,8 +32,8 @@ END_DATE="$2"
 # No dates given: derive them from the data, so the rates always cover the orders
 if [ -z "$START_DATE" ] || [ -z "$END_DATE" ]; then
   # -t no header, -A unaligned, -c one command: gives a bare value, not a table
-  START_DATE=$(psql "$DATABASE_URL" -tAc "SELECT min(order_date)::date FROM retail_oltp.orders;")
-  END_DATE=$(psql "$DATABASE_URL" -tAc "SELECT max(order_date)::date + $BUFFER_DAYS FROM retail_oltp.orders;")
+  START_DATE=$(psql "$DATABASE_URL" -tAc "SELECT (min(order_date) AT TIME ZONE 'UTC')::date FROM retail_oltp.orders;")
+  END_DATE=$(psql "$DATABASE_URL" -tAc "SELECT (max(order_date) AT TIME ZONE 'UTC')::date + $BUFFER_DAYS FROM retail_oltp.orders;")
 fi
 
 if [ -z "$START_DATE" ] || [ -z "$END_DATE" ]; then
@@ -63,7 +63,7 @@ UNCOVERED=$(psql "$DATABASE_URL" -tAc "
   WHERE o.currency_code <> '${BASE_CURRENCY:-GBP}'
     AND NOT EXISTS (
       SELECT 1 FROM retail_oltp.exchange_rates r
-      WHERE r.rate_date = o.order_date::date
+      WHERE r.rate_date = (o.order_date AT TIME ZONE 'UTC')::date
         AND r.target_currency_code = o.currency_code
     );")
 
