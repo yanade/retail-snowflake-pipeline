@@ -115,3 +115,48 @@ def test_rerunning_the_same_batch_changes_nothing(spark: SparkSession, tmp_path:
 
     stored = spark.read.format("delta").load(curated_path(str(tmp_path), "customers"))
     assert stored.count() == 2
+
+
+def test_first_write_enables_change_data_feed(spark: SparkSession, tmp_path: Path) -> None:
+    curated_root = str(tmp_path)
+    empty_orders = spark.createDataFrame([], get_source_schema("orders"))
+
+    merge_into_curated(spark, empty_orders, "orders", curated_root)
+
+    path = curated_path(curated_root, "orders")
+    props = spark.sql(f"DESCRIBE DETAIL delta.`{path}`").first()["properties"]
+    assert props.get("delta.enableChangeDataFeed") == "true"
+
+
+def test_merges_are_recorded_in_change_data_feed(
+    spark: SparkSession, tmp_path: Path
+) -> None:
+    """The served export reads CDF, so both the create and the update must appear in it."""
+    first = _valid_customers(spark, [
+        {"customer_id": 1, "email": "old@example.com", "updated_at": EARLIER,
+         SOURCE_FILE_COLUMN: "run_a.json", DQ_ERRORS_COLUMN: []},
+    ])
+    second = _valid_customers(spark, [
+        {"customer_id": 1, "email": "new@example.com", "updated_at": LATER,
+         SOURCE_FILE_COLUMN: "run_b.json", DQ_ERRORS_COLUMN: []},
+    ])
+
+    path = merge_into_curated(spark, first, "customers", str(tmp_path))  # version 0
+    merge_into_curated(spark, second, "customers", str(tmp_path))  # version 1
+
+    changes = (
+        spark.read.format("delta")
+        .option("readChangeFeed", "true")
+        .option("startingVersion", 0)
+        .load(path)
+    )
+    recorded = sorted(
+        (row["_commit_version"], row["_change_type"], row["email"])
+        for row in changes.collect()
+    )
+
+    assert recorded == [
+        (0, "insert", "old@example.com"),
+        (1, "update_postimage", "new@example.com"),
+        (1, "update_preimage", "old@example.com"),
+    ]
