@@ -1,87 +1,63 @@
-# retail-snowflake-pipeline
 # Retail Sales Analytics Pipeline
 
-> 🚧 **Status: In Progress** 
+> 🚧 **Status: In Progress.** Source, ingestion and the raw-to-curated
+> transformation run end to end. The served zone, dbt, DVT, Airflow and the
+> dashboard are designed but not built yet.
 
-A production-style end-to-end data engineering pipeline built on UK e-commerce
-transaction data. Demonstrates incremental loading, data validation, dead-letter
-error handling, and observability across a modern Azure + Snowflake stack.
+A production-style data engineering pipeline from a live PostgreSQL OLTP
+database to a star schema in Snowflake, with incremental loading, data quality
+rules, dead-letter handling and validation on every load.
 
 ---
 
 ## Overview
 
-This project runs against a self-built PostgreSQL 16 OLTP source
-(`database/`) — a normalized, multi-country retail operational database
-(customers, orders, order_items, payments, products, stores, employees),
-enriches order values with live FX rates from
-[freecurrencyapi.com](https://freecurrencyapi.com), transforms the
-normalized source into a star schema in Snowflake, and validates every
-incremental load with Google's Data Validation Tool (DVT).
+The source is a self-built PostgreSQL 16 OLTP database (`database/`): a
+normalized, multi-country retail system with customers, orders, order lines,
+payments, products, stores, employees, currencies and exchange rates. It is
+generated with deliberate operational messiness (nulls, duplicate business
+keys, negative quantities, invalid statuses) so the quality layers have real
+problems to catch.
 
-**Business scenario:** An international retailer (stores in the UK,
-Germany, France, and Canada) needs a reliable pipeline that loads new
-orders, converts multi-currency order values to USD, detects data quality
-issues automatically, and alerts the team on failures.
+**Business scenario:** a retailer with stores in the UK, Germany, France and
+Canada needs a reliable pipeline that loads new and changed orders, converts
+GBP, EUR and CAD order values to USD, detects data quality issues
+automatically, and alerts the team on failures.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  SOURCES                                                    │
-│  PostgreSQL retail_oltp ──┐                                 │
-│  freecurrencyapi.com API──┼──▶  Azure Data Factory          │
-│  Terraform + GitHub     ──┘     (watermark incremental)     │
-└─────────────────────────────────────────────────────────────┘
-                                        │
-                                        ▼
-┌─────────────────────────────────────────────────────────────┐
-│  STORAGE — ADLS Gen2 (3 zones)                              │
-│  Raw zone          Curated zone        Served zone          │
-│  JSON,        →    Delta,          →   Snowflake-ready      │
-│  date-part.        merged on PK,       Parquet              │
-│                    one per source table                     │
-└─────────────────────────────────────────────────────────────┘
-                                        │
-                                        ▼
-┌─────────────────────────────────────────────────────────────┐
-│  TRANSFORM — Databricks PySpark                             │
-│  Incremental merge · FX conversion · flat → flat            │
-│                    │               │                        │
-│              happy path        bad records                  │
-│                    │               ▼                        │
-│                    │        Dead-letter table               │
-│                    │        (error + raw payload)  ──loop─▶ │
-└────────────────────┼────────────────────────────────────────┘
-                     │
-                     ▼
-┌─────────────────────────────────────────────────────────────┐
-│  WAREHOUSE — Snowflake + dbt                                │
-│  Incremental models · star schema · dbt tests + docs        │
-│                    │                                        │
-│                    ▼                                        │
-│  VALIDATION — DVT                                           │
-│  Row counts · null checks · sum reconciliation per load     │
-│                    │                                        │
-│         ┌──────────┴──────────┐                            │
-│         ▼                     ▼                            │
-│   Audit table           Airflow alerts                      │
-│   run_id, rows,         Retry → Slack →                     │
-│   pass/fail, ts         log to audit                        │
-└─────────────────────────────────────────────────────────────┘
-                                        │
-                                        ▼
-┌─────────────────────────────────────────────────────────────┐
-│  OBSERVE                                                    │
-│  Streamlit dashboard — DVT results, row counts, pass/fail   │
-│  Azure Monitor — infra and pipeline logs                    │
-└─────────────────────────────────────────────────────────────┘
-
-Airflow DAG orchestrates every layer end-to-end.
-Terraform provisions all Azure infrastructure as code.
+freecurrencyapi.com ──▶ fetch_fx_rates.py ──▶ PostgreSQL retail_oltp
+                                                    │
+                        Azure Data Factory          │  per-table watermark on updated_at,
+                                                    ▼  plus a lookback window
+ADLS raw        JSON, year=/month=/day= by extraction date
+                                                    │
+                        Databricks PySpark          │  cast, DQ rules, dedupe,
+                                                    ▼  MERGE on primary key
+ADLS curated    Delta, one table per source table ──────▶ dead-letter (Delta)
+                                                    │
+                        Databricks          planned │  Change Data Feed by Delta version
+                                                    ▼
+ADLS served     Parquet, one folder per table, plus a manifest of the files written
+                                                    │
+                        COPY INTO           planned │  files named in the manifest only
+                                                    ▼
+Snowflake raw   append-only change log, one typed table per source table
+                                                    │
+                        dbt                 planned │  dedupe, FX cross rates, star schema
+                                                    ▼
+Snowflake marts fact_sales, dim_customer, dim_product, dim_date
+                                                    │
+                        DVT, Airflow        planned ▼
+pipeline_audit, Slack alerts, Streamlit dashboard
 ```
+
+Airflow will orchestrate every layer end to end. Terraform provisions the Azure
+infrastructure. Snowflake reads the served container through a storage
+integration with read-only access to that container alone.
 
 ---
 
@@ -89,15 +65,16 @@ Terraform provisions all Azure infrastructure as code.
 
 | Layer | Tool |
 |---|---|
-| Cloud infrastructure | Azure (ADLS Gen2, ADF, Databricks, Monitor) |
+| Source | PostgreSQL 16 (Azure Flexible Server, local Docker for development) |
+| Cloud infrastructure | Azure (ADLS Gen2, ADF, Databricks, Key Vault, Azure SQL, Monitor) |
 | Infrastructure as code | Terraform |
-| Transformation | Databricks PySpark |
+| Transformation | Databricks PySpark on serverless, Delta Lake, Unity Catalog |
 | Data warehouse | Snowflake |
 | Data modelling | dbt Core + dbt-snowflake |
 | Data validation | DVT (Data Validation Tool) |
 | Orchestration | Apache Airflow |
 | Dashboard | Streamlit |
-| CI/CD | GitHub Actions |
+| CI | GitHub Actions |
 | Language | Python 3.13, SQL |
 
 ---
@@ -105,46 +82,58 @@ Terraform provisions all Azure infrastructure as code.
 ## Key Engineering Patterns
 
 **Incremental loading**
-Every mutable `retail_oltp` table has an `updated_at` column refreshed by a
-PostgreSQL trigger on insert/update. ADF uses a per-table watermark strategy
-— each run pulls only rows newer than the last watermark
-(`ingestion/watermark/watermark_control.sql`). Databricks performs PySpark
-upsert (merge) on each table's primary key. dbt models use `incremental`
-materialisation with `unique_key = 'sale_id'`.
+`updated_at` is set by a column default on insert and by a trigger on every
+update. ADF keeps one watermark per table in Azure SQL and copies only rows
+changed since the last run, re-reading a lookback window (three days for
+orders, order lines and payments) so late commits are not lost. Databricks
+keeps the latest version of each primary key and merges it into curated only
+when it is newer, so re-running a load changes nothing. From curated onward,
+increments are selected by Delta version through Change Data Feed, not by
+`updated_at`.
 
-**Dead-letter pattern**
-Records that fail at any pipeline stage (null `customer_id`, negative
-`order_items.quantity` that aren't returns, invalid `payment_status`,
-referential integrity failures) are captured in a Snowflake `dead_letter`
-table with error reason and raw payload. A separate Airflow DAG handles
-reprocessing of failed records.
+**Raw in Snowflake is a change log, not a mirror** (planned)
+`COPY INTO` only appends, and each increment carries every row that changed.
+A key therefore appears once per version in `raw`, and counting rows there
+overstates everything. dbt's staging models deduplicate to the current
+version, and no model reads `raw` directly. The same log gives dimension
+history without `dbt snapshot`. See ADR-020.
 
-**Observability**
-Every pipeline run writes a row to a `pipeline_audit` table in Snowflake
-— run ID, rows ingested, rows failed, DVT status, start/end timestamps.
-A Streamlit app reads this table live and surfaces pass/fail trends,
-row count history, and dead-letter counts.
+**Data quality and dead-letter**
+Rows are rejected for a malformed JSON line, a value that will not convert to
+its type, a NULL key or required column, a zero quantity, or an unknown
+`order_status` or `payment_status`. Each rejected row keeps every reason it
+failed and its original payload, in a Delta table registered as
+`retail_dev.ops.dead_letter`. A bad row seen again on a later run is not
+recorded twice.
 
-**FX enrichment**
-GBP transaction values are enriched with daily exchange rates from
-[freecurrencyapi.com](https://freecurrencyapi.com) — free tier supports
-historical data back to 2010, enabling multi-currency reporting in the star schema.
+Two things are deliberately **not** rejections: a NULL `customer_id` is a guest
+checkout and maps to an unknown customer, and a negative quantity is a return,
+flagged `is_return`.
 
-**Databricks vs dbt — separation of responsibilities**
-Databricks and dbt each own a distinct layer — they are not interchangeable:
+**FX conversion** (planned, in dbt)
+Rates are fetched from [freecurrencyapi.com](https://freecurrencyapi.com) with
+GBP as the base, so each rate means "units per one GBP". Orders are in GBP, EUR
+or CAD, so dbt converts through a cross rate:
+`rate(GBP to USD) / rate(GBP to order currency)`. Orders without a rate for
+their date go to a rejected table, not into the fact with a NULL amount.
+
+**Databricks vs dbt**
 
 | | Databricks | dbt |
 |---|---|---|
-| Responsibility | Data preparation | Dimensional modelling |
-| Input | Raw Postgres extract (JSON) from ADLS | Clean flat Parquet from served zone |
-| Output | Clean enriched flat Parquet | Star schema tables in Snowflake |
+| Responsibility | Validation, deduplication, change capture | Dimensional modelling, FX, business rules |
+| Input | Raw JSON extracts from ADLS | Source-shaped change log in Snowflake `raw` |
+| Output | Curated Delta tables, served Parquet | Star schema in Snowflake |
 | Language | PySpark | SQL |
-| Tests | Unit tests on transformation logic | Data quality tests on the model |
+| Tests | Unit tests on transformation logic | Data tests on the models |
 
-Databricks cleans, enriches with FX rates, and routes bad records to dead-letter —
-but outputs a **flat enriched file**, not a star schema.
-dbt reads that flat file and builds `dim_customer`, `dim_product`, `dim_date`,
-and `fact_sales`. The star schema lives entirely in dbt/Snowflake.
+Databricks never joins tables or computes business values. Served keeps the
+source shape, so grain and business rules live in exactly one place: dbt.
+
+**Observability** (planned)
+Every run will write a row to `pipeline_audit` in Snowflake: run ID, rows
+ingested, rows failed, validation status, start and end time. A Streamlit app
+will read it live.
 
 ---
 
@@ -156,9 +145,11 @@ and `fact_sales`. The star schema lives entirely in dbt/Snowflake.
 dim_customer ──── fact_sales ──── dim_product
 ```
 
-Engineered from a single flat source file into four tables:
-`fact_sales`, `dim_customer`, `dim_product`, `dim_date`,
-plus `pipeline_audit` and `dead_letter` operational tables.
+`fact_sales` has one row per order line. Order-level amounts are not carried as
+measures, because they repeat on every line of an order. `order_status` is
+carried, and every revenue figure must filter on it: cancelled orders are
+roughly a tenth of line revenue in the generated data. Operational tables:
+`pipeline_audit` and `dead_letter`.
 
 ---
 
@@ -166,124 +157,87 @@ plus `pipeline_audit` and `dead_letter` operational tables.
 
 ```
 retail-snowflake-pipeline/
-├── database/            # PostgreSQL OLTP source system
+├── database/           # PostgreSQL OLTP source: schema, seed, data generators
+├── ingestion/          # ADF pipeline exports, watermark tables, FX rates script
+├── transformation/     # PySpark modules and Databricks notebooks
+├── snowflake/          # Snowflake DDL: warehouse, role, storage integration, stage
 ├── terraform/          # Azure infrastructure as code
-├── ingestion/          # ADF pipelines + freecurrencyapi.com script
-├── transformation/     # Databricks PySpark notebooks
-├── dbt/                # dbt models (staging → intermediate → marts)
-├── validation/         # DVT validation suite
-├── orchestration/      # Airflow DAGs (pipeline + reprocess)
-├── dashboard/          # Streamlit data quality app
-└── .github/workflows/  # CI: Terraform validate + dbt test on PR
+├── scripts/            # bootstrap, load, deploy and simulation scripts
+├── tests/              # pytest suite
+├── docs/               # architecture decisions and runbooks
+└── .github/workflows/  # CI: pytest, terraform fmt and validate
+
+Planned: dbt/, validation/, orchestration/, dashboard/
 ```
 
 ---
 
 ## Build Progress
 
-- [x] Project architecture designed
-- [x] FX rates ingestion script — freecurrencyapi.com (`ingestion/api_ingest/`)
-- [x] Unit tests — 15 tests passing (`tests/ingestion/api_ingest/`)
-- [x] Terraform — Azure infrastructure
-- [x] ADLS Gen2 — 3-zone storage with date partitioning
-- [x] ADF — watermark-based incremental pipeline
-- [x] Databricks — PySpark incremental transformation
-- [x] Dead-letter handler
-- [ ] Snowflake — star schema
-- [ ] dbt — staging, intermediate, mart models + tests
-- [ ] DVT — validation suite
-- [ ] Airflow — main + reprocess DAGs
-- [ ] Streamlit — data quality dashboard
+- [x] PostgreSQL OLTP source with generated data and deliberate DQ issues
+- [x] FX rates ingestion script (`ingestion/api_ingest/`)
+- [x] Terraform: Azure infrastructure
+- [x] ADF: watermark-based incremental pipeline into the raw zone
+- [x] Databricks: raw to curated, with DQ rules, dedupe and MERGE
+- [x] Dead-letter capture
+- [x] Snowflake: warehouse, role, storage integration and stage
 - [x] GitHub Actions CI
+- [ ] Served zone export (Change Data Feed, manifest)
+- [ ] Snowflake raw tables and COPY INTO
+- [ ] dbt: staging, intermediate and mart models, tests
+- [ ] DVT validation suite
+- [ ] Airflow: main and reprocess DAGs
+- [ ] Streamlit data quality dashboard
 
 ---
 
 ## Setup
 
 ### Prerequisites
-- Docker (for the PostgreSQL source — `database/docker-compose.yml` — and for Airflow)
-- Azure subscription
-- Snowflake account
-- [freecurrencyapi.com](https://freecurrencyapi.com) API key — free tier sufficient
-- Python 3.13
-- Terraform >= 1.6
 
-### Environment variables
-Copy `.env.example` to `.env` and fill in your credentials:
+- Azure subscription and the Azure CLI
+- Snowflake account and the Snowflake CLI (`snow`)
+- [freecurrencyapi.com](https://freecurrencyapi.com) API key, free tier
+- Python 3.13, and Java 17 for PySpark
+- Terraform >= 1.6
+- Docker, for a local PostgreSQL
+
+Copy `.env.example` to `.env` and fill in the values:
+
 ```bash
 cp .env.example .env
 ```
 
-### Infrastructure
+### Runbooks
 
-Before running Terraform for the first time, create the remote state storage manually:
+Setup is procedural and lives in `docs/`:
 
-```bash
-az group create \
-  --name retail-pipeline-tfstate-rg \
-  --location uksouth
+| Runbook | Covers |
+|---|---|
+| `docs/rebuild-runbook.md` | Azure from scratch: Terraform state, infrastructure, secrets, source data |
+| `docs/snowflake-setup-runbook.md` | Snowflake account, key-pair auth, storage integration and stage |
+| `docs/incremental-run-runbook.md` | Simulating source changes and running one incremental load |
 
-az storage account create \
-  --name retailpipelinetfstatex7k \
-  --resource-group retail-pipeline-tfstate-rg \
-  --location uksouth \
-  --sku Standard_LRS
-
-az storage container create \
-  --name tfstate \
-  --account-name retailpipelinetfstatex7k
-```
-
-Then provision all infrastructure:
+### Run the tests
 
 ```bash
-cd terraform
-terraform init
-terraform plan
-terraform apply
+pytest -v
 ```
 
-### Run FX rates ingestion
+### Run a load by hand
 
-```bash
-# activate virtual environment
-source venv/bin/activate
+Until Airflow exists, one load is three manual steps, described in
+`docs/incremental-run-runbook.md`:
 
-# fetch GBP rates for a date range
-python -m ingestion.api_ingest.main --start 2025-01-01 --end 2025-01-03
-
-# output saved to ingestion/api_ingest/output/
-```
-
-### Run tests
-
-```bash
-pytest tests/ingestion/api_ingest/ -v
-```
-
-### Run the pipeline
-```bash
-# Start Airflow
-cd orchestration
-docker compose up -d
-
-# Trigger the main DAG
-# Open Airflow UI at http://localhost:8080
-# Trigger: pipeline_dag
-```
+1. `./scripts/simulate_source_changes.sh` to create new and changed rows
+2. Trigger `pl_load_data` in ADF Studio
+3. Run the Databricks job `raw_to_curated` with `reader = batch`
 
 ---
 
-## Source Database
+## Documentation
 
-**PostgreSQL retail_oltp** — self-built, normalized OLTP schema simulating
-a live international retailer
-- 12 tables: customers, orders, order_items, payments, products, stores,
-  employees, currencies, exchange_rates, and more
-- Generated data includes intentional operational messiness (nulls,
-  duplicate business keys, negative quantities, invalid statuses, missing
-  FX rates) so the DQ/dead-letter layers have real problems to catch
-- Full schema and design rationale: `database/README.md`
-
----
-
+- `docs/architecture-decisions.md`: every design decision with its
+  alternatives, including the served zone contract (ADR-020)
+- `database/README.md`: source schema and the data quality scenarios it
+  generates
