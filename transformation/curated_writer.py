@@ -15,6 +15,7 @@ from transformation.schemas.source_schemas import get_source_schema
 TARGET_ALIAS = "target"
 SOURCE_ALIAS = "source"
 CHECKPOINTS_DIRECTORY = "_checkpoints"
+CHANGE_DATA_FEED_PROPERTY = "delta.enableChangeDataFeed"
 
 
 def curated_path(curated_root: str, table: str) -> str:
@@ -55,8 +56,9 @@ def merge_into_curated(
     """
     Upsert valid rows into the curated Delta table for one source table.
 
-    Creates the table on the first run. After that, rows are matched on the
-    primary key and updated only when the incoming version is newer, so a
+    Creates the table on the first run, with Change Data Feed enabled
+    After that, rows are matched on the primary key and updated
+    only when the incoming version is newer, so a
     re-read of older data cannot move curated backwards.
 
     Args:
@@ -76,7 +78,11 @@ def merge_into_curated(
     to_write = _source_columns_only(df, table)
 
     if not DeltaTable.isDeltaTable(spark, path):
-        to_write.write.format("delta").save(path)  # first run: nothing to merge into
+        (
+            to_write.write.format("delta")
+            .option(CHANGE_DATA_FEED_PROPERTY, "true")
+            .save(path)
+        )  # first run: nothing to merge into
         return path
 
     key_match = " AND ".join(
