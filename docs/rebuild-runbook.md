@@ -3,9 +3,16 @@
 Cold-start procedure for deploying this project to a fresh Azure subscription,
 or rebuilding after `terraform destroy`.
 
-Under ADR-004's cost discipline the whole stack is destroyed and recreated
-rather than left running, so this is a routine procedure, not a disaster
-recovery one.
+Under ADR-021 the stack is no longer destroyed between sessions, so this is a
+recovery procedure rather than a routine one. Ending a session now means
+stopping PostgreSQL, see "Ending a session" below.
+
+The Snowflake layer is not covered here, it has its own procedure in
+`snowflake-setup-runbook.md`. The two are joined at one point: rebuilding Azure
+destroys the `served` container and with it the role assignment Snowflake reads
+through. After a rebuild, re-run step 6 of that runbook. The consent itself
+survives, because Snowflake's service principal lives in Entra ID rather than
+in the subscription.
 
 Expect 40 to 60 minutes, most of it waiting on Terraform.
 
@@ -257,6 +264,25 @@ Run `transformation/sql/unity_catalog_setup.sql` in the SQL Editor.
 
 Verify: `SHOW SCHEMAS IN retail_dev;` returns `curated`, `served`, `ops`,
 `default`.
+
+---
+
+## Ending a session
+
+ADR-021 replaced "destroy everything" with "suspend everything". One action is
+left:
+
+```bash
+az postgres flexible-server stop --name retail-pipeline-dev-pg --resource-group retail-pipeline-dev-rg
+```
+
+Everything else idles on its own: the Azure SQL watermark database auto-pauses
+after 60 idle minutes, Databricks serverless stops when a job ends, and the
+Snowflake warehouse suspends after 60 idle seconds, under an account-level
+resource monitor capped at 50 credits a month.
+
+Storage, Key Vault and the ADF definitions bill whether or not you are working.
+That floor is what ADR-021 accepts in exchange for not rebuilding.
 
 ---
 
