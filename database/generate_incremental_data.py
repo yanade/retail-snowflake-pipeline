@@ -59,7 +59,7 @@ def get_next_start_date(connection: psycopg.Connection) -> datetime:
     """
 
     with connection.cursor() as cursor:
-        cursor.execute("select max(order_date::date) from retail_oltp.orders")
+        cursor.execute("select max((order_date at time zone 'UTC')::date) from retail_oltp.orders")
         (max_date,) = cursor.fetchone()
 
     if max_date is None:
