@@ -10,15 +10,15 @@
 
 import sys
 from pathlib import Path
+
 from pyspark.sql import functions as F
-from transformation.curated_writer import CHANGE_DATA_FEED_PROPERTY, curated_path
 
 REPO_ROOT = str(Path.cwd().parents[1])
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from transformation.config.table_config import TABLE_CONFIGS
-from transformation.curated_writer import curated_path
+from transformation.curated_writer import CHANGE_DATA_FEED_PROPERTY, curated_path
 from transformation.dead_letter import dead_letter_path
 
 # COMMAND ----------
@@ -31,13 +31,19 @@ for table in sorted(TABLE_CONFIGS):
         f"CREATE TABLE IF NOT EXISTS retail_dev.curated.{table} "
         f"USING DELTA LOCATION '{curated_path(curated_root, table)}'"
     )
+    spark.sql(
+        f"ALTER TABLE retail_dev.curated.{table} "
+        f"SET TBLPROPERTIES ('{CHANGE_DATA_FEED_PROPERTY}' = 'true')"
+    )  # tables created before ADR-020 have no CDF
 
 spark.sql(
     f"CREATE TABLE IF NOT EXISTS retail_dev.ops.dead_letter "
-    f"SET TBLPROPERTIES ('{CHANGE_DATA_FEED_PROPERTY}' = 'true')"
+    f"USING DELTA LOCATION '{dead_letter_path(curated_root)}'"
 )
 
 display(spark.sql("SHOW TABLES IN retail_dev.curated"))
+
+# COMMAND ----------
 
 for table in sorted(TABLE_CONFIGS):
     enabled_at = (
