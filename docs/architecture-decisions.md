@@ -576,9 +576,10 @@ missing rate. The cross-rate formula and the rule against loading a NULL
 measure are unchanged.
 
 Missing rates are caught in two places instead. They are prevented:
-`bootstrap_fx_rates.sh` and `simulate_source_changes.sh` already fail when any
-order lacks a rate for its date, so a missing rate is an operational error and
-not an expected condition. And they are contained: in dbt the FX join splits
+`simulate_source_changes.sh` fails when any order lacks a rate for its date,
+so a missing rate is an operational error and not an expected condition.
+`bootstrap_fx_rates.sh` only reports the count of uncovered orders and does
+not fail. And they are contained: in dbt the FX join splits
 into two models from one source, rows with a rate feeding `fact_sales` and rows
 without landing in a rejected table. A dbt test cannot do this, because a test
 fails a run rather than routing a row.
