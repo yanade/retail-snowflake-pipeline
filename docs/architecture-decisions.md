@@ -1155,6 +1155,10 @@ cannot be misread.
 
 Accepted
 
+Amended on 2026-09-28 by ADR-020's amendment. COPY no longer names only its
+own run's files: it names every manifest row from the last 7 days, so the
+64-day load memory matters again and the window must stay well inside it.
+
 ### Context
 
 Databricks writes the served zone to ADLS as Parquet, partitioned
@@ -1323,6 +1327,43 @@ the component that provides it.
   shifts by seven or eight hours.
 - Raw as a change log is the project's least intuitive property. It has to be
   stated in the README, not only here.
+
+### Amendment, 2026-09-28: the manifest is a Delta table, and the load reads it
+
+The decision above tied each COPY to the files of one run. A crash between
+export and load would then leave files that no later run names.
+
+**Decision:**
+
+- **Manifest.** `retail_dev.ops.served_manifest`, append-only, one row per
+  table per run: `run_id`, `table_name`, `table_id`, `export_mode`
+  (`snapshot` or `cdf`), `start_version`, `end_version`, `files`, `row_count`,
+  `written_at`. The last exported version is `max(end_version)`; there is no
+  separate state table. Parquet is written first, and the appended row is the
+  commit point.
+- **Load.** COPY names the files of every manifest row from the last 7 days
+  and skips those already loaded. A crash between export and load loses
+  nothing. The window stays well under COPY's 64-day load memory, and the load
+  fails if an unloaded row is older than the window.
+- **Run directory.** `served/<table>/year=/month=/day=/run_id=<id>/`, so
+  `inputFiles()` returns this run's files only.
+- **Pinned version.** The export reads the current version N first, then
+  reads at N: `versionAsOf` for a snapshot, `startingVersion =
+  max(end_version) + 1` and `endingVersion = N` for CDF. A MERGE committed
+  during the export cannot reach the files without reaching the manifest.
+- **Full reload by flag only.** The export fails when a table has no manifest
+  rows and `full_reload` is not set, or when `table_id` differs from the last
+  row (the table was rebuilt and its versions restarted). `export_mode`, not a
+  NULL `start_version`, says what a row is.
+- **Empty runs** write a row with `row_count = 0` and no files, so
+  `end_version` advances.
+
+**Supersedes:** the Partitioning path gains the `run_id=` level; COPY names
+the files of all unloaded manifest rows in the window, not one run's; the row
+count check is per manifest row, summing `rows_loaded` for its files from
+`COPY_HISTORY`, since one COPY can span several rows and one row's files can
+span two COPYs; the watermark store is the manifest alone, still single
+writer.
 
 ## ADR-021: Cost Control by Suspending Compute, Not Destroying the Stack
 
