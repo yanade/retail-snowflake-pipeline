@@ -1365,6 +1365,24 @@ count check is per manifest row, summing `rows_loaded` for its files from
 span two COPYs; the watermark store is the manifest alone, still single
 writer.
 
+### Amendment, 2026-10-01: refinements found while implementing the export
+
+- **Watermark.** The export watermark is the end_version and table_id of the
+  table's latest manifest row, ordered by written_at, not max(end_version).
+  Manifest writes are single-writer and serialized, so written_at is commit
+  order. After a rebuild and full_reload, the new snapshot row is the latest
+  even though its end_version is lower; rows of a previous table_id never
+  become the watermark again.
+- **Empty runs.** A new Delta version gives a manifest row even with
+  row_count = 0, and its files list is empty. When N equals the last
+  end_version, nothing is read and no row is written.
+- **Export directory.** One directory per export attempt,
+  `export_id=<uuid>`, not per run. Airflow retries a task with the same
+  run_id, so a run_id directory left by a failed attempt would fail every
+  retry under errorifexists. A failed attempt's directory is never in the
+  manifest, so it is never loaded. The manifest's run_id column still holds
+  the Airflow run.
+
 ## ADR-021: Cost Control by Suspending Compute, Not Destroying the Stack
 
 ### Status
