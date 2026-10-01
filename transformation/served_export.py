@@ -4,7 +4,10 @@ Read curated Delta tables for export to the served zone.
 A snapshot reads a whole table at one version; a change read takes the
 Change Data Feed between two versions. Both return the source shape (ADR-020).
 """
+
+
 from datetime import date
+from delta.tables import DeltaTable
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
@@ -71,6 +74,24 @@ def read_changes(
         .where(F.col(CHANGE_TYPE_COLUMN).isin(*EXPORTED_CHANGE_TYPES))
         .select(*get_source_schema(table).fieldNames())  # also drops the CDF columns
     )
+
+
+def curated_state(spark: SparkSession, curated_root: str, table: str) -> tuple[int, str]:
+    """
+    Read a curated table's current Delta version and table id.
+
+    Args:
+        spark: Active SparkSession.
+        curated_root: Root of the curated zone.
+        table: Source table name.
+
+    Returns:
+        (version, table_id); the version is what the export pins and reads.
+    """
+    delta_table = DeltaTable.forPath(spark, curated_path(curated_root, table))
+    version = delta_table.history(1).first()["version"]  # latest commit only
+    table_id = delta_table.detail().first()["id"]
+    return version, table_id
 
 
 def _export_directory(table: str, run_date: date, export_id: str) -> str:
