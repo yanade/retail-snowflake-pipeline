@@ -3,6 +3,7 @@ Tests for transformation/served_export.py, reading curated Delta tables
 written by merge_into_curated() into pytest's tmp_path.
 """
 import pytest
+import shutil
 
 from datetime import datetime, date
 from pathlib import Path
@@ -13,7 +14,7 @@ from pyspark.sql import DataFrame, SparkSession
 from transformation.curated_writer import merge_into_curated
 from transformation.schemas.source_schemas import get_source_schema
 from transformation.served_export import read_snapshot
-from transformation.served_export import read_changes, read_snapshot, write_served
+from transformation.served_export import read_changes, read_snapshot, write_served, curated_state
 
 
 
@@ -148,3 +149,40 @@ def test_reused_export_id_fails_and_keeps_the_first_files(
     assert sorted(p.name for p in export_dir.glob("*.parquet")) == [
         f.rsplit("/", 1)[-1] for f in first_files
     ]
+
+
+def test_curated_state_is_the_latest_version_and_a_stable_id(
+    spark: SparkSession, tmp_path: Path
+) -> None:
+    """The version moves with every commit; the table id does not."""
+    curated_root = str(tmp_path)
+    merge_into_curated(spark, _customers(spark, [
+        {"customer_id": 1, "email": "old@example.com", "updated_at": EARLIER},
+    ]), "customers", curated_root)  # version 0
+    version_0, id_0 = curated_state(spark, curated_root, "customers")
+
+    merge_into_curated(spark, _customers(spark, [
+        {"customer_id": 1, "email": "new@example.com", "updated_at": LATER},
+    ]), "customers", curated_root)  # version 1
+    version_1, id_1 = curated_state(spark, curated_root, "customers")
+
+    assert (version_0, version_1) == (0, 1)
+    assert id_0 == id_1
+
+
+def test_rebuilt_curated_table_gets_a_new_id(spark: SparkSession, tmp_path: Path) -> None:
+    """A rebuild restarts versions under a new id, which is what plan_export detects."""
+    curated_root = str(tmp_path)
+    rows = _customers(spark, [
+        {"customer_id": 1, "email": "a@example.com", "updated_at": EARLIER},
+    ])
+    merge_into_curated(spark, rows, "customers", curated_root)
+    merge_into_curated(spark, rows, "customers", curated_root)  # version 1, no changes
+    _, old_id = curated_state(spark, curated_root, "customers")
+
+    shutil.rmtree(tmp_path / "customers")  # the rebuild: folder gone, table written again
+    merge_into_curated(spark, rows, "customers", curated_root)
+    new_version, new_id = curated_state(spark, curated_root, "customers")
+
+    assert new_version == 0
+    assert new_id != old_id
