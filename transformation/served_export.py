@@ -73,11 +73,11 @@ def read_changes(
     )
 
 
-def _run_directory(table: str, run_date: date, run_id: str) -> str:
-    """Run directory relative to the served root, as the stage sees it (ADR-020)."""
+def _export_directory(table: str, run_date: date, export_id: str) -> str:
+    """Export directory relative to the served root, as the stage sees it (ADR-020)."""
     return (
         f"{table}/year={run_date:%Y}/month={run_date:%m}/day={run_date:%d}"
-        f"/run_id={run_id}"
+        f"/export_id={export_id}"
     )
 
 
@@ -87,10 +87,10 @@ def write_served(
     served_root: str,
     table: str,
     run_date: date,
-    run_id: str,
+    export_id: str,
 ) -> tuple[list[str], int]:
     """
-    Write one export as Parquet into its own run directory.
+    Write one export attempt as Parquet into its own directory.
 
     Args:
         spark: Active SparkSession.
@@ -98,15 +98,15 @@ def write_served(
         served_root: Root of the served zone.
         table: Source table name.
         run_date: UTC date of the run.
-        run_id: Unique id of the run.
+        export_id: Unique id of this export attempt.
 
     Returns:
         Files relative to served_root, and the row count read back from them.
     """
-    relative_dir = _run_directory(table, run_date, run_id)
+    relative_dir = _export_directory(table, run_date, export_id)
     full_dir = f"{served_root}/{relative_dir}"
 
-    df.write.mode("errorifexists").parquet(full_dir)  # a reused run_id fails, never overwrites
+    df.write.mode("errorifexists").parquet(full_dir)  # a reused export_id fails, never overwrites
 
     written = spark.read.parquet(full_dir)
     row_count = written.count()
@@ -117,4 +117,3 @@ def write_served(
         f"{relative_dir}/{uri.rsplit('/', 1)[-1]}" for uri in written.inputFiles()
     )
     return files, row_count
-
