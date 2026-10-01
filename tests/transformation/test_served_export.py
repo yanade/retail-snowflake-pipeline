@@ -2,22 +2,27 @@
 Tests for transformation/served_export.py, reading curated Delta tables
 written by merge_into_curated() into pytest's tmp_path.
 """
+import pytest
 
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 
+from pyspark.errors import AnalysisException
 from pyspark.sql import DataFrame, SparkSession
 
 from transformation.curated_writer import merge_into_curated
 from transformation.schemas.source_schemas import get_source_schema
 from transformation.served_export import read_snapshot
-from transformation.served_export import read_changes, read_snapshot
+from transformation.served_export import read_changes, read_snapshot, write_served
 
 
 
 EARLIER = datetime(2025, 6, 1, 9, 0)
 LATER = datetime(2025, 6, 10, 9, 0)
 LATEST = datetime(2025, 6, 20, 9, 0)
+RUN_DATE = date(2026, 10, 1)
+RUN_ID = "run-1"
+RUN_DIR = "customers/year=2026/month=10/day=01/run_id=run-1/"
 
 
 def _customers(spark: SparkSession, rows: list[dict]) -> DataFrame:
@@ -100,4 +105,46 @@ def test_key_changed_twice_appears_twice(spark: SparkSession, tmp_path: Path) ->
     assert sorted(row["email"] for row in changes.collect()) == [
         "new@example.com",
         "newest@example.com",
+    ]
+
+def test_written_files_are_relative_and_inside_the_run_directory(
+    spark: SparkSession, tmp_path: Path
+) -> None:
+    """The manifest names files the stage can resolve, from this run only."""
+    df = _customers(spark, [
+        {"customer_id": 1, "email": "a@example.com", "updated_at": EARLIER},
+        {"customer_id": 2, "email": "b@example.com", "updated_at": EARLIER},
+    ])
+
+    files, row_count = write_served(spark, df, str(tmp_path), "customers", RUN_DATE, RUN_ID)
+
+    assert row_count == 2
+    assert files
+    assert all(f.startswith(RUN_DIR) and f.endswith(".parquet") for f in files)
+
+
+def test_empty_export_lists_no_files(spark: SparkSession, tmp_path: Path) -> None:
+    """A run with no rows records row_count 0 and no files, so COPY never sees them."""
+    empty = _customers(spark, [])
+
+    files, row_count = write_served(spark, empty, str(tmp_path), "customers", RUN_DATE, RUN_ID)
+
+    assert (files, row_count) == ([], 0)
+
+
+def test_reused_run_id_fails_and_keeps_the_first_files(
+    spark: SparkSession, tmp_path: Path
+) -> None:
+    """Written files are immutable: a second write to the same run directory fails."""
+    df = _customers(spark, [
+        {"customer_id": 1, "email": "a@example.com", "updated_at": EARLIER},
+    ])
+    first_files, _ = write_served(spark, df, str(tmp_path), "customers", RUN_DATE, RUN_ID)
+
+    with pytest.raises(AnalysisException, match="PATH_ALREADY_EXISTS"):
+        write_served(spark, df, str(tmp_path), "customers", RUN_DATE, RUN_ID)
+
+    run_dir = tmp_path / RUN_DIR
+    assert sorted(p.name for p in run_dir.glob("*.parquet")) == [
+        f.rsplit("/", 1)[-1] for f in first_files
     ]
