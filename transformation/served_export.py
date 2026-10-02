@@ -128,7 +128,7 @@ def write_served(
     relative_dir = _export_directory(table, run_date, export_id)
     full_dir = f"{served_root}/{relative_dir}"
 
-    df.write.mode("errorifexists").parquet(full_dir)  # a reused export_id fails, never overwrites
+    df.write.mode("error").parquet(full_dir)  # a reused export_id fails, never overwrites
 
     written = spark.read.parquet(full_dir)
     row_count = written.count()
