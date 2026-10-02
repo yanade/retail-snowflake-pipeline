@@ -11,7 +11,7 @@ from pyspark.sql.types import StringType, StructField, StructType
 from transformation.curated_writer import curated_path
 from transformation.dead_letter import dead_letter_path
 from transformation.pipeline import process_raw_batch
-from transformation.raw_reader import CORRUPT_RECORD_COLUMN, SOURCE_FILE_COLUMN
+from transformation.raw_reader import CORRUPT_RECORD_COLUMN, SOURCE_FILE_COLUMN, read_raw
 from transformation.schemas.source_schemas import get_source_schema, to_read_schema
 
 
@@ -92,3 +92,19 @@ def test_a_genuinely_malformed_line_is_still_dead_lettered(
     counts = process_raw_batch(spark, raw, "order_items", str(tmp_path))
 
     assert counts == {"rows_read": 1, "rows_valid": 0, "rows_rejected": 1}
+
+
+def test_artifacts_are_dropped_when_reading_real_files(spark: SparkSession, tmp_path: Path) -> None:
+    """Through read_raw(), as on Databricks: Spark restricts queries on _corrupt_record alone."""
+    folder = tmp_path / "raw" / "order_items" / "year=2026" / "month=10" / "day=02"
+    folder.mkdir(parents=True)
+    (folder / "run_a.json").write_text(
+        '{"order_item_id":1,"product_id":5,"quantity":2,"unit_price":9.99,'
+        '"updated_at":"2025-06-01T10:00:00Z"}\n'
+    )
+    (folder / "empty_run.json").write_bytes(b"\xef\xbb\xbf")  # what ADF writes for a 0-row copy
+
+    raw = read_raw(spark, "order_items", str(tmp_path / "raw"))
+    counts = process_raw_batch(spark, raw, "order_items", str(tmp_path / "curated"))
+
+    assert counts == {"rows_read": 1, "rows_valid": 1, "rows_rejected": 0}
