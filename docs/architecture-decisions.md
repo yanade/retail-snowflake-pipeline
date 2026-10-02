@@ -1032,6 +1032,30 @@ Evidence must be captured at the last point it is still true.
   bytes remain recoverable via `_source_file`.
 - Contains personal data, so dead-letter needs source-level access control.
 
+### Amendment: the payload is evidence, not identity
+
+`raw_payload` is not stable between runs. ADF writes amounts as JSON number
+tokens (`0.00`), the reader declares every column a string, and Spark rendered
+the same token as `"0.00"` in one run and `"0.0"` in the next. `record_id`
+hashed the payload, so a rerun with no new data re-inserted 111 known problems.
+
+**Decision:** `record_id = xxhash64(source_table, source_key, updated_at,
+error_reason, _corrupt_record)`. A parsed row is identified by its version
+(primary key plus `updated_at`, which the source trigger changes on every
+update) and its reasons. A malformed line has neither, so its exact text
+identifies it. `raw_payload` stays in the table for people to read.
+
+Records holding only a BOM or whitespace, which ADF writes for a 0-row copy,
+are dropped before validation instead of being dead-lettered.
+
+**Consequences:**
+
+- Corrects the first consequence above: a number is not always rendered as
+  the same string.
+- A row changed in the source gets one record per version.
+- The new formula changes every existing id, so `dead_letter` is emptied once
+  and rebuilt from raw when this is deployed.
+
 ---
 
 ## ADR-017: Pinning the Spark Session Time Zone to UTC
