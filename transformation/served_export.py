@@ -1,8 +1,9 @@
 """
-Read curated Delta tables for export to the served zone.
+Read curated Delta tables and write them to the served zone.
 
 A snapshot reads a whole table at one version; a change read takes the
-Change Data Feed between two versions. Both return the source shape (ADR-020).
+Change Data Feed between two versions. Both return the source shape, and
+write_served puts each export attempt in its own directory (ADR-020).
 """
 
 
