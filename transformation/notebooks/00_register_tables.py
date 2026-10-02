@@ -1,10 +1,10 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Register curated and dead-letter tables in Unity Catalog
+# MAGIC # Register curated, dead-letter and served manifest tables in Unity Catalog
 # MAGIC
-# MAGIC Run once per deployment, after the first pipeline run has created the
-# MAGIC paths. Idempotent: CREATE TABLE IF NOT EXISTS. See ADR-010 and ADR-012.
-# MAGIC Also enables Change Data Feed on every curated table (ADR-020).
+# MAGIC Run once per deployment, after 01_raw_to_curated and the first
+# MAGIC 02_curated_to_served have created the paths. Idempotent: CREATE TABLE
+# MAGIC IF NOT EXISTS. See ADR-010, ADR-012 and ADR-020.
 
 # COMMAND ----------
 
@@ -20,6 +20,7 @@ if REPO_ROOT not in sys.path:
 from transformation.config.table_config import TABLE_CONFIGS
 from transformation.curated_writer import CHANGE_DATA_FEED_PROPERTY, curated_path
 from transformation.dead_letter import dead_letter_path
+from transformation.served_manifest import manifest_path
 
 # COMMAND ----------
 
@@ -41,7 +42,13 @@ spark.sql(
     f"USING DELTA LOCATION '{dead_letter_path(curated_root)}'"
 )
 
+spark.sql(
+    f"CREATE TABLE IF NOT EXISTS retail_dev.ops.served_manifest "
+    f"USING DELTA LOCATION '{manifest_path(curated_root)}'"
+)
+
 display(spark.sql("SHOW TABLES IN retail_dev.curated"))
+display(spark.sql("SHOW TABLES IN retail_dev.ops"))
 
 # COMMAND ----------
 
