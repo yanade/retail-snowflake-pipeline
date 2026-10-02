@@ -84,3 +84,24 @@ def test_rewriting_the_same_rejects_inserts_nothing(spark: SparkSession, tmp_pat
     write_dead_letter(spark, rejected, "order_items", str(tmp_path))
 
     assert spark.read.format("delta").load(dead_letter_path(str(tmp_path))).count() == 1
+
+
+def test_first_write_records_a_duplicated_reject_once(spark: SparkSession, tmp_path: Path) -> None:
+    """The same bad row in two raw files of one batch creates one record."""
+    duplicated = (1, ["zero_quantity"], '{"order_item_id":"1"}')
+    rejected = _rejected(spark, [duplicated, duplicated])  # e.g. two overlapping ADF runs
+
+    write_dead_letter(spark, rejected, "order_items", str(tmp_path))
+
+    assert spark.read.format("delta").load(dead_letter_path(str(tmp_path))).count() == 1
+
+
+def test_merge_records_a_duplicated_reject_once(spark: SparkSession, tmp_path: Path) -> None:
+    """Insert-only MERGE dedupes against the target, not within the source."""
+    existing = _rejected(spark, [(2, ["null_product_id"], '{"order_item_id":"2"}')])
+    write_dead_letter(spark, existing, "order_items", str(tmp_path))  # table exists, so the next write MERGEs
+
+    duplicated = (1, ["zero_quantity"], '{"order_item_id":"1"}')
+    write_dead_letter(spark, _rejected(spark, [duplicated, duplicated]), "order_items", str(tmp_path))
+
+    assert spark.read.format("delta").load(dead_letter_path(str(tmp_path))).count() == 2
