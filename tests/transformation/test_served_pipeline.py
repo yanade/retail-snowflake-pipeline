@@ -12,7 +12,7 @@ from pyspark.sql import DataFrame, SparkSession
 from transformation.curated_writer import merge_into_curated, curated_path
 from transformation.schemas.source_schemas import get_source_schema
 from transformation.served_manifest import MANIFEST_DIRECTORY, SNAPSHOT_MODE, CDF_MODE, manifest_path
-from transformation.served_pipeline import export_table
+from transformation.served_pipeline import export_table, parse_flag
 from transformation.served_export import curated_state
 
 TABLE = "customers"
@@ -176,6 +176,19 @@ def test_new_version_without_row_changes_records_an_empty_export(
         "file_count": 0,
     }
     assert spark.read.format("delta").load(manifest_path(curated_root)).count() == 2
+
+
+def test_parse_flag_accepts_true_and_false() -> None:
+    """The only two spellings a flag may have."""
+    assert parse_flag("full_reload", "true") is True
+    assert parse_flag("full_reload", "false") is False
+
+
+@pytest.mark.parametrize("value", ["ture", "True", "true ", "yes", ""])
+def test_parse_flag_rejects_anything_else(value: str) -> None:
+    """A typo stops the run instead of silently meaning false."""
+    with pytest.raises(ValueError, match="full_reload"):
+        parse_flag("full_reload", value)
 
 
 

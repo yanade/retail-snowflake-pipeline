@@ -13,6 +13,23 @@ from transformation.served_manifest import (
     read_last_export,
 )
 
+FLAG_VALUES = {"true": True, "false": False}
+
+def parse_flag(name: str, value: str) -> bool:
+    """
+    Convert a text parameter to bool, accepting only 'true' or 'false'.
+
+    Args:
+        name: Parameter name, for the error message.
+        value: Raw text from the widget.
+
+    Returns:
+        The flag as bool.
+    """
+    if value not in FLAG_VALUES:
+        raise ValueError(f"{name} must be 'true' or 'false', got {value!r}")
+    return FLAG_VALUES[value]
+
 
 def export_table(
     spark: SparkSession,
