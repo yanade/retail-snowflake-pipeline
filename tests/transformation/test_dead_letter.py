@@ -3,6 +3,7 @@ Tests for transformation/dead_letter.py, on rejected rows shaped like
 split_valid_rejected() output.
 """
 
+from datetime import datetime
 from pathlib import Path
 
 from pyspark.sql import DataFrame, SparkSession
@@ -13,16 +14,26 @@ from transformation.dead_letter import (
     write_dead_letter,
 )
 
-REJECTED_SCHEMA = "order_item_id long, _dq_errors array<string>, _raw_payload string"
+REJECTED_SCHEMA = (
+    "order_item_id long, updated_at timestamp, _dq_errors array<string>, "
+    "_raw_payload string, _corrupt_record string"
+)
+UPDATED = datetime(2025, 6, 1, 9, 0)
+UPDATED_LATER = datetime(2025, 6, 10, 9, 0)
 DEAD_LETTER_COLUMNS = [
     "record_id", "source_table", "source_key", "error_reason",
     "raw_payload", "failed_at", "reprocessed", "reprocessed_at",
 ]
 
 
-def _rejected(spark: SparkSession, rows: list[tuple]) -> DataFrame:
-    """Rejected order_items as (order_item_id, _dq_errors, _raw_payload)."""
+def _rejected_rows(spark: SparkSession, rows: list[tuple]) -> DataFrame:
+    """Rejected order_items as (order_item_id, updated_at, _dq_errors, _raw_payload, _corrupt_record)."""
     return spark.createDataFrame(rows, REJECTED_SCHEMA)
+
+
+def _rejected(spark: SparkSession, rows: list[tuple]) -> DataFrame:
+    """Rejected parsed order_items as (order_item_id, _dq_errors, _raw_payload), one version each."""
+    return _rejected_rows(spark, [(key, UPDATED, errors, payload, None) for key, errors, payload in rows])
 
 
 def test_shape_matches_the_dead_letter_schema(spark: SparkSession) -> None:
@@ -105,3 +116,34 @@ def test_merge_records_a_duplicated_reject_once(spark: SparkSession, tmp_path: P
     write_dead_letter(spark, _rejected(spark, [duplicated, duplicated]), "order_items", str(tmp_path))
 
     assert spark.read.format("delta").load(dead_letter_path(str(tmp_path))).count() == 2
+
+
+def test_payload_text_does_not_change_the_record_id(spark: SparkSession) -> None:
+    """Spark may render the same number token as 0.00 or 0.0; it is still one problem."""
+    rows = build_dead_letter_rows(_rejected_rows(spark, [
+        (1, UPDATED, ["zero_quantity"], '{"order_item_id":"1","tax_amount":"0.00"}', None),
+        (1, UPDATED, ["zero_quantity"], '{"order_item_id":"1","tax_amount":"0.0"}', None),
+    ]), "order_items")
+
+    assert rows.select("record_id").distinct().count() == 1
+
+
+def test_a_new_version_of_the_row_is_a_new_record(spark: SparkSession) -> None:
+    """A later updated_at means the source changed the row, so it is a new problem."""
+    payload = '{"order_item_id":"1","quantity":"0"}'
+    rows = build_dead_letter_rows(_rejected_rows(spark, [
+        (1, UPDATED, ["zero_quantity"], payload, None),
+        (1, UPDATED_LATER, ["zero_quantity"], payload, None),
+    ]), "order_items")
+
+    assert rows.select("record_id").distinct().count() == 2
+
+
+def test_malformed_lines_are_told_apart_by_their_text(spark: SparkSession) -> None:
+    """With no key and no updated_at, the exact line is what identifies the problem."""
+    rows = build_dead_letter_rows(_rejected_rows(spark, [
+        (None, None, ["malformed_json"], '{"order_item_id": 3, "quan', '{"order_item_id": 3, "quan'),
+        (None, None, ["malformed_json"], '{"order_item_id": 4, "pri', '{"order_item_id": 4, "pri'),
+    ]), "order_items")
+
+    assert rows.select("record_id").distinct().count() == 2

@@ -1,8 +1,9 @@
 """
 Write rejected rows to the dead-letter Delta table.
 
-record_id hashes the problem. Rows are deduplicated on it, then insert-only
-MERGEd, so a bad row is recorded once however often it arrives. See ADR-012.
+record_id hashes the problem: the row version (key + updated_at) and the
+reason, or the exact text of a malformed line. Rows are deduplicated on it,
+then insert-only MERGEd, so a bad row is recorded once. See ADR-012.
 """
 
 from delta.tables import DeltaTable
@@ -12,6 +13,7 @@ from pyspark.sql import functions as F
 from transformation.config.table_config import get_table_config
 from transformation.dq_rules import DQ_ERRORS_COLUMN
 from transformation.raw_payload import RAW_PAYLOAD_COLUMN
+from transformation.raw_reader import CORRUPT_RECORD_COLUMN
 
 DEAD_LETTER_DIRECTORY = "_dead_letter"  # ADR-012: curated/_dead_letter/, underscore keeps it out of the table namespace
 KEY_SEPARATOR = "|"                     # between composite primary key parts
@@ -67,10 +69,12 @@ def build_dead_letter_rows(df: DataFrame, table: str) -> DataFrame:
     source_key = _source_key(config.primary_key)
     error_reason = F.concat_ws(REASON_SEPARATOR, F.col(DQ_ERRORS_COLUMN))
     raw_payload = F.col(RAW_PAYLOAD_COLUMN)
+    row_version = F.col(config.watermark_column)    # changes on every source update, so key + version is one row version
+    malformed_text = F.col(CORRUPT_RECORD_COLUMN)   # NULL for a parsed row, the exact line for a malformed one
 
     return df.select(
-        # failed_at is deliberately NOT in the hash: it would make every run a new record
-        F.xxhash64(source_table, source_key, error_reason, raw_payload).alias("record_id"),
+        # identity is the row version and the reason; raw_payload text is not stable (ADR-016)
+        F.xxhash64(source_table, source_key, row_version, error_reason, malformed_text).alias("record_id"),
         source_table.alias("source_table"),
         source_key.alias("source_key"),
         error_reason.alias("error_reason"),
