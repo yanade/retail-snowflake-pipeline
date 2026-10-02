@@ -2,7 +2,7 @@
 Tests for transformation/pipeline.py: the full chain on one batch, from raw
 rows to the two Delta outputs.
 """
-
+import pytest
 from pathlib import Path
 
 from pyspark.sql import DataFrame, SparkSession
@@ -59,3 +59,36 @@ def test_rerunning_the_same_batch_is_a_no_op(spark: SparkSession, tmp_path: Path
 
     assert spark.read.format("delta").load(curated_path(str(tmp_path), "order_items")).count() == 1
     assert spark.read.format("delta").load(dead_letter_path(str(tmp_path))).count() == 1
+
+
+BOM = "\ufeff"  # what ADF writes into the file of a copy that moved 0 rows
+
+
+@pytest.mark.parametrize("artifact", [BOM, BOM + " "])
+def test_an_empty_export_artifact_is_dropped(
+    spark: SparkSession, tmp_path: Path, artifact: str
+) -> None:
+    """A BOM-only record is not data: it is not read, rejected or dead-lettered."""
+    raw = _raw_order_items(spark, [
+        {"order_item_id": "1", "product_id": "5", "quantity": "2", "unit_price": "9.99",
+         "updated_at": "2025-06-01T10:00:00Z", SOURCE_FILE_COLUMN: "run_a.json"},
+        {CORRUPT_RECORD_COLUMN: artifact, SOURCE_FILE_COLUMN: "empty_run.json"},
+    ])
+
+    counts = process_raw_batch(spark, raw, "order_items", str(tmp_path))
+
+    assert counts == {"rows_read": 1, "rows_valid": 1, "rows_rejected": 0}
+    assert spark.read.format("delta").load(dead_letter_path(str(tmp_path))).count() == 0
+
+
+def test_a_genuinely_malformed_line_is_still_dead_lettered(
+    spark: SparkSession, tmp_path: Path
+) -> None:
+    """The artifact filter must not swallow lines that have real content."""
+    raw = _raw_order_items(spark, [
+        {CORRUPT_RECORD_COLUMN: BOM + '{"order_item_id": 3, "quan', SOURCE_FILE_COLUMN: "run_a.json"},
+    ])
+
+    counts = process_raw_batch(spark, raw, "order_items", str(tmp_path))
+
+    assert counts == {"rows_read": 1, "rows_valid": 0, "rows_rejected": 1}
