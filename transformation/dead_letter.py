@@ -1,10 +1,8 @@
 """
 Write rejected rows to the dead-letter Delta table.
 
-Rejected rows are not deduplicated upstream and ADF re-copies rows on purpose,
-so the same bad row arrives run after run. record_id is a deterministic hash of
-the problem, and the write is an insert-only MERGE, so re-seeing a known bad
-row inserts nothing. See ADR-012 and ADR-016.
+record_id hashes the problem. Rows are deduplicated on it, then insert-only
+MERGEd, so a bad row is recorded once however often it arrives. See ADR-012.
 """
 
 from delta.tables import DeltaTable
@@ -98,7 +96,7 @@ def write_dead_letter(
     Returns:
         The path written to.
     """
-    rows = build_dead_letter_rows(rejected, table)
+    rows = build_dead_letter_rows(rejected, table).dropDuplicates(["record_id"])  # one batch can carry the same bad row twice
     path = dead_letter_path(curated_root)
 
     if not DeltaTable.isDeltaTable(spark, path):
