@@ -10,6 +10,7 @@ import json
 from datetime import date, timedelta, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 logger = setup_logging()
@@ -438,7 +439,10 @@ def parse_args() -> argparse.Namespace:
         ),
     )
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.start > args.end:
+        parser.error(f"--start {args.start} must not be after --end {args.end}")  # a typo, so stop before config or API calls
+    return args
 
 
 def main() -> None:
@@ -471,12 +475,14 @@ def main() -> None:
     )
 
     if args.write_postgres:
-        row_count = upsert_rates_to_postgres(
+        database_url = get_database_url()
+        parsed = urlparse(database_url)
+        logger.info("Writing to host=%s database=%s", parsed.hostname, parsed.path.lstrip("/"))  # never the password
+        upsert_rates_to_postgres(
             rates=rates,
-            database_url=get_database_url(),
+            database_url=database_url,
             base_currency=config["base_currency"],
         )
-        logger.info("Wrote %d exchange rate rows to PostgreSQL.", row_count)
     else:
         logger.info("JSON only. Pass --write-postgres to load into the database.")
 

@@ -1,14 +1,16 @@
 import json
 import pytest
 import requests
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 
 from ingestion.api_ingest.fetch_fx_rates import (
+    DEFAULT_LOOKBACK_DAYS,
     load_config,
     fetch_fx_rates,
+    parse_args,
     save_rates_to_json,
     upsert_rates_to_postgres,
 )
@@ -242,3 +244,47 @@ def test_upsert_rates_to_postgres_skips_unchanged_rates(sample_rates):
         "where (exchange_rates.exchange_rate, exchange_rates.source_system) "
         "is distinct from (excluded.exchange_rate, excluded.source_system)"
     ) in sql
+
+
+# ── parse_args() tests ───────────────────────────────────────────────────────
+
+def test_parse_args_valid_dates():
+    """--start and --end are parsed into date objects."""
+    with patch("sys.argv", ["fetch_fx_rates", "--start", "2025-02-03", "--end", "2025-02-06"]):
+        args = parse_args()
+
+    assert (args.start, args.end) == (date(2025, 2, 3), date(2025, 2, 6))
+    assert args.write_postgres is False
+
+
+def test_parse_args_defaults_to_the_last_lookback_window():
+    """No dates means the last DEFAULT_LOOKBACK_DAYS days, ending today in UTC."""
+    with patch("sys.argv", ["fetch_fx_rates"]):
+        args = parse_args()
+
+    today = datetime.now(timezone.utc).date()
+    assert args.end == today
+    assert args.start == today - timedelta(days=DEFAULT_LOOKBACK_DAYS - 1)  # inclusive range
+
+
+def test_parse_args_accepts_a_single_day():
+    """The same date for --start and --end is a one-day fetch."""
+    with patch("sys.argv", ["fetch_fx_rates", "--start", "2025-02-03", "--end", "2025-02-03"]):
+        args = parse_args()
+
+    assert args.start == args.end == date(2025, 2, 3)
+
+
+@pytest.mark.parametrize("bad_date", ["03-02-2025", "2025/02/03", "tomorrow"])
+def test_parse_args_rejects_a_malformed_date(bad_date):
+    """A date that is not YYYY-MM-DD stops at parse time."""
+    with patch("sys.argv", ["fetch_fx_rates", "--start", bad_date]):
+        with pytest.raises(SystemExit):
+            parse_args()
+
+
+def test_parse_args_rejects_start_after_end():
+    """An empty range is a typo, so it fails before any config or API call."""
+    with patch("sys.argv", ["fetch_fx_rates", "--start", "2025-02-06", "--end", "2025-02-03"]):
+        with pytest.raises(SystemExit):
+            parse_args()
