@@ -42,9 +42,9 @@ check fails, so **do not run the script again**. Fetch only the missing dates:
 ./scripts/bootstrap_fx_rates.sh 2025-02-03 2025-02-06   # first uncovered date, last order date + 3
 ```
 
-An explicit range matters. With no arguments the script refetches every date,
-and the unconditional upsert refreshes `updated_at` on every existing rate, so
-every layer downstream sees fake changes.
+Without arguments the script refetches every order date. That is safe,
+because a rate that has not changed keeps its `updated_at`, but it costs one
+API call per date, so an explicit range is quicker.
 
 **Why both kinds of change matter.** New rows exercise INSERT in the MERGE.
 Updated rows exercise `dedupe()` picking the newer version and the guard
