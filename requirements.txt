@@ -13,3 +13,5 @@ pandas>=2.2.3,<3  # PySpark 4.2 does not support pandas 3 yet; the SQL connector
 
 # Loading layer: reads ops.served_manifest through the retail_loader SQL warehouse.
 databricks-sql-connector==4.6.0
+
+snowflake-connector-python==4.7.5
