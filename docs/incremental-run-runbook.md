@@ -1,9 +1,9 @@
 # Incremental Run Runbook
 
 How to simulate a day of source activity and watch the incremental pipeline
-handle it, from Postgres to the served zone. This exercises the watermark, the
-lookback window, `dedupe()`, the MERGE guard, dead-letter deduplication and the
-CDF export on real data.
+handle it, from Postgres to Snowflake raw. This exercises the watermark, the
+lookback window, `dedupe()`, the MERGE guard, dead-letter deduplication, the
+CDF export and the manifest-driven COPY on real data.
 
 `rebuild-runbook.md` covers the cold start. This one assumes everything is
 already deployed and loaded at least once, including one `full_reload` export.
@@ -23,6 +23,10 @@ Expect 45 to 60 minutes, most of it waiting on ADF and Databricks jobs.
 - `source session.sh` **in the terminal you run the commands from**, and
   `.env` pointing at Azure rather than local Docker. A bare `psql "$DATABASE_URL"`
   with an empty variable silently connects to localhost instead of failing.
+
+- `venv` active, and `.env` holding `DATABRICKS_HOST`, `DATABRICKS_HTTP_PATH`,
+  `DATABRICKS_TOKEN` and `SNOWFLAKE_CONNECTION_NAME` for step 6. The token
+  expires after 30 days: an HTTP 403 on the manifest read means renew it.
 
 ## 1. Create new and changed rows
 
@@ -153,7 +157,41 @@ lists, keeps the latest row per primary key, and compares the result with
 curated in both directions. It fails if any table has a difference, so a clean
 finish means served rebuilds curated exactly.
 
-## 6. Stop the source
+## 6. Load into Snowflake raw
+
+```bash
+python -m loading.load_raw --dry-run
+```
+
+```bash
+python -m loading.load_raw
+```
+
+The dry run reads the manifest through the `retail_loader` SQL warehouse and
+lists the files per table without touching Snowflake. The real run checks the
+raw schema, COPYs every export of the last 7 days by name, then counts each
+export's rows in raw by `_source_file`.
+
+Expected:
+
+- tables changed in step 1: `N files loaded`, rows equal to their CDF export
+- every earlier file: `LOAD_SKIPPED`, which is a rerun, not an error
+- one `OK` line per manifest row in the window, and no exception
+
+Running it twice changes nothing: the second run shows `0 files loaded` for
+every table.
+
+**If it fails:**
+
+- `SchemaDrift(...)`: a raw table differs from `RAW_COLUMNS`. Nothing was
+  loaded. Fix the table or redeploy `create_raw_tables.sql`, then rerun.
+- `exports not in raw exactly once`: `actual` 0 is a missing load, half is a
+  partial one, double is a FORCE reload. Query raw by `_source_file` for the
+  named run.
+- an export older than 7 days is never loaded: load within the window
+  (ADR-020).
+
+## 7. Stop the source
 
 ```bash
 az postgres flexible-server stop --name retail-pipeline-dev-pg --resource-group retail-pipeline-dev-rg
@@ -180,6 +218,9 @@ triggered twice by accident and the runs overlapped.
 | served, orders | `cdf 12 -> 13`, 57 rows, no preimages |
 | served, static tables | `cdf N -> N`, 0 rows |
 | served replay vs curated | 1594 rows, 1569 keys, 0 differences |
+| raw (Snowflake), first load | 22 files, 18 exports, all `OK` |
+| raw (Snowflake), rerun | 22 `LOAD_SKIPPED`, 18 `OK` |
+| raw, orders | 1594 rows: 1537 snapshot + 57 CDF |
 | dead_letter, before the fixes | 624 to 665: 14 new bad rows stored twice, plus 13 BOM rows |
 | dead_letter, rebuilt after them | 638 (616 order_items + 22 payments), still 638 on a second run |
 
