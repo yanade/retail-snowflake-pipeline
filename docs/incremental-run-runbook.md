@@ -72,7 +72,8 @@ whole lookback window, not only the changed rows. `exchange_rates` loads only
 new rates, because its `lookback_days` is 0.
 
 Raw now holds one more file per table, under a new `day=` partition. A table
-that copied 0 rows still gets a file: 3 bytes, only a UTF-8 BOM.
+that copied 0 rows still gets a file: 3 bytes, only a UTF-8 BOM. The
+transformation drops it before validation.
 
 **If two runs overlap**, the data stays correct (lookback plus `dedupe()`), but
 the bookkeeping does not: `rows_loaded` shows whichever run wrote last, and the
@@ -92,8 +93,7 @@ Expected shape, per table:
   the lookback window re-copied
 - `rows_valid` is the distinct primary keys that passed the DQ rules
 - the curated row count ends up equal to the source row count after DQ rules
-- every BOM-only file adds one `malformed_json` row to `rows_rejected`
-  (known issue, see below)
+- BOM-only files count nowhere: not in `rows_read`, not in `rows_rejected`
 
 Batch reads every raw file, so a table skipped in an earlier run catches up
 here: its missing rows arrive as inserts.
@@ -102,8 +102,12 @@ here: its missing rows arrive as inserts.
 
 ```sql
 SELECT count(*) FROM retail_dev.curated.orders;     -- equals the source count
-SELECT count(*) FROM retail_dev.ops.dead_letter;    -- grows by the new bad rows
+SELECT count(*) FROM retail_dev.ops.dead_letter;    -- grows only by new bad rows, never on a rerun
 ```
+
+Each bad source row version is recorded once: `count(*)` equals
+`count(DISTINCT record_id)`, and rerunning the job with no new data inserts
+nothing (ADR-016 amendment).
 
 ```sql
 DESCRIBE HISTORY retail_dev.curated.orders LIMIT 3;
@@ -159,19 +163,6 @@ compute stops when the run ends.
 
 ---
 
-## Known issues, found 2026-10-02
-
-- **Dead-letter keeps duplicates within one batch.** The insert-only MERGE
-  dedupes against the target, not within the source, so a bad row present in
-  two raw files of the same run is inserted twice.
-- **BOM-only files become junk rows.** Each 0-row ADF copy produces one
-  `malformed_json` dead-letter row with an empty payload.
-
-Until both are fixed, `dead_letter` grows by more than the genuinely new bad
-rows.
-
----
-
 ## Reference run, 2026-10-02
 
 32 new orders and 25 updated ones, so 57 changed rows in the source. ADF was
@@ -188,10 +179,16 @@ triggered twice by accident and the runs overlapped.
 | served, orders | `cdf 12 -> 13`, 57 rows, no preimages |
 | served, static tables | `cdf N -> N`, 0 rows |
 | served replay vs curated | 1594 rows, 1569 keys, 0 differences |
-| dead_letter | 624 to 665: 14 new bad rows stored twice, plus 13 BOM rows |
+| dead_letter, before the fixes | 624 to 665: 14 new bad rows stored twice, plus 13 BOM rows |
+| dead_letter, rebuilt after them | 638 (616 order_items + 22 payments), still 638 on a second run |
 
 `customer_addresses` exported 71 rows, not 36: an earlier run had skipped the
 table, and batch reading inserted the 35 missing rows.
+
+This run exposed three dead-letter bugs, all fixed the same day: duplicates
+within one batch, BOM files recorded as rejects, and a `record_id` that hashed
+unstable payload text (a rerun with no new data added 111 rows). `dead_letter`
+was then emptied and rebuilt from raw.
 
 ## Reference run, 2026-09-25
 
@@ -209,5 +206,5 @@ table, and batch reading inserted the 35 missing rows.
 
 Absolute numbers will differ next time. The relationships should not:
 `rows_read` equals the sum of the files, `rows_valid` equals the distinct keys,
-inserted plus updated equals the rows that actually changed in the source, and
-the served replay equals curated.
+inserted plus updated equals the rows that actually changed in the source,
+a rerun adds nothing to dead_letter, and the served replay equals curated.
