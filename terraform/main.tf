@@ -79,14 +79,12 @@ module "keyvault" {
 # Azure Data Factory — ingestion orchestrator
 
 module "adf" {
-  source               = "./modules/adf"
-  project_name         = var.project_name
-  environment          = var.environment
-  location             = var.location
-  resource_group_name  = azurerm_resource_group.main.name
-  storage_account_name = module.adls.storage_account_name
-  key_vault_id         = module.keyvault.key_vault_id
-  tags                 = var.tags
+  source              = "./modules/adf"
+  project_name        = var.project_name
+  environment         = var.environment
+  location            = var.location
+  resource_group_name = azurerm_resource_group.main.name
+  tags                = var.tags
 }
 
 # Databricks — PySpark transformation workspace

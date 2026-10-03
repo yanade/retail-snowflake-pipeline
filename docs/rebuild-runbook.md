@@ -224,6 +224,10 @@ Git integration is declared in Terraform, so the factory reconnects to the
 repository automatically. In ADF Studio: **Publish**, then **Debug** or
 **Trigger now** on `pl_load_data`.
 
+`terraform apply` leaves the factory empty. Linked services, datasets and the
+pipeline are owned by ADF Git (ADR-023), so they only exist after this first
+Publish.
+
 Verify:
 
 ```sql
@@ -275,6 +279,10 @@ left:
 ```bash
 az postgres flexible-server stop --name retail-pipeline-dev-pg --resource-group retail-pipeline-dev-rg
 ```
+
+Start it again before any `terraform plan` or `apply`. The refresh reads the
+`retail_source` database and fails with `ServerStoppedError` on a stopped
+server.
 
 Everything else idles on its own: the Azure SQL watermark database auto-pauses
 after 60 idle minutes, Databricks serverless stops when a job ends, and the

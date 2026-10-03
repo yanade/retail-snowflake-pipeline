@@ -1502,3 +1502,52 @@ watermark, for every source table.
   `updated_at`, a changed rate was restored and re-stamped.
 - In production the data team would not run this feed. It lives in
   `ingestion/api_ingest/` only because the project builds its own source.
+
+---
+
+## ADR-023: Terraform Owns the Factory, ADF Git Owns Its Content
+
+### Status
+
+Accepted
+
+### Context
+
+Terraform created the factory and also two linked services, `ls_adls_dev`
+and `ls_key_vault`. ADF Git holds all four linked services, the datasets and
+the pipeline, and Publish deploys them. Two definitions of the same two objects
+meant whoever wrote last won. It broke Publish on 2026-10-03: the copies ADF
+imported from the Terraform-built factory carried a `type` line that made
+Publish try to delete them. `terraform plan` showed no drift that day, so the
+conflict was latent rather than active.
+
+### Decision
+
+Terraform owns the infrastructure: the factory, its managed identity, the
+GitHub connection, Key Vault access and the storage role. ADF Git owns the
+content: every linked service, dataset and pipeline. The two linked services
+leave Terraform through `removed` blocks with `destroy = false`, so nothing
+in Azure changes.
+
+### Alternatives Considered
+
+- **Everything in Terraform:** loses Studio authoring and the pipeline history.
+- **Linked services in Terraform only:** Git mode needs every referenced object
+  in Git, so Publish fails.
+- **Terraform creates, then ignores changes:** keeps a second definition that
+  nobody applies, the state the July import came from.
+- **ARM deployment through CI/CD, parameterised URLs:** right for several
+  environments, too much for one.
+
+### Rationale
+
+One owner per object removes the race. Six of the eight content objects
+already lived only in Git, and the rebuild already deploys them with Publish.
+
+### Consequences
+
+- The storage and Key Vault URLs stay hard-coded in the linked service JSON;
+  a renamed resource still means editing it by hand (rebuild runbook).
+- A second environment is the trigger for parameterised ARM deployment.
+- Terraform no longer manages the linked services, so `terraform destroy`
+  leaves them to go with the factory.

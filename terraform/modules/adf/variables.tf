@@ -20,16 +20,6 @@ variable "resource_group_name" {
   type        = string
 }
 
-variable "storage_account_name" {
-  description = "Name of the ADLS Gen2 storage account: used to build the DFS endpoint URL."
-  type        = string
-}
-
-variable "key_vault_id" {
-  description = "Azure resource ID of Key Vault."
-  type        = string
-}
-
 variable "tags" {
   description = "Tags applied to the ADF instance."
   type        = map(string)

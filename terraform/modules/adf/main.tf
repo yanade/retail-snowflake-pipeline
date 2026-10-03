@@ -27,19 +27,21 @@ resource "azurerm_data_factory" "main" {
   tags = var.tags
 }
 
-# Linked service: connects ADF to ADLS Gen2 using Managed Identity
+# Linked services, datasets and pipelines are owned by ADF Git (ADR-023).
+# These blocks only drop the two Terraform used to create from state; destroy = false keeps them in Azure.
 
-resource "azurerm_data_factory_linked_service_data_lake_storage_gen2" "adls" {
-  name                 = "ls_adls_${var.environment}"
-  data_factory_id      = azurerm_data_factory.main.id
-  url                  = "https://${var.storage_account_name}.dfs.core.windows.net"
-  use_managed_identity = true
+removed {
+  from = azurerm_data_factory_linked_service_data_lake_storage_gen2.adls
+
+  lifecycle {
+    destroy = false
+  }
 }
 
-# Linked service: connects ADF to Key Vault for secret retrieval at runtime
+removed {
+  from = azurerm_data_factory_linked_service_key_vault.keyvault
 
-resource "azurerm_data_factory_linked_service_key_vault" "keyvault" {
-  name            = "ls_key_vault"
-  data_factory_id = azurerm_data_factory.main.id
-  key_vault_id    = var.key_vault_id
+  lifecycle {
+    destroy = false
+  }
 }
