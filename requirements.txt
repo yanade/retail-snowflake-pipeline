@@ -9,3 +9,7 @@ psycopg[binary]
 pyspark==4.2.0
 delta-spark==4.4.0
 pyarrow>=18.0.0
+pandas>=2.2.3,<3  # PySpark 4.2 does not support pandas 3 yet; the SQL connector accepts both
+
+# Loading layer: reads ops.served_manifest through the retail_loader SQL warehouse.
+databricks-sql-connector==4.6.0
