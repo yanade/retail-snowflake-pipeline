@@ -63,7 +63,7 @@ refuse the first login while it resumes. Retry after a minute.
 sqlcmd -S retail-pipeline-dev-sql.database.windows.net -d watermark-db -U sqladmin -P "$TF_VAR_sql_admin_password" -Q "SELECT pipeline_name, rows_loaded, last_watermark FROM dbo.pipeline_watermark_control ORDER BY pipeline_name;"
 ```
 
-ADF Studio, `pl_load_data`, Add trigger, Trigger now, **once**. Wait for it in
+ADF Studio, `pl_load_data`, Add trigger, Trigger now. Wait for it in
 Monitor, then run the same query again.
 
 Expected: every `last_watermark` moves to one shared time, because
@@ -75,9 +75,10 @@ Raw now holds one more file per table, under a new `day=` partition. A table
 that copied 0 rows still gets a file: 3 bytes, only a UTF-8 BOM. The
 transformation drops it before validation.
 
-**If two runs overlap**, the data stays correct (lookback plus `dedupe()`), but
-the bookkeeping does not: `rows_loaded` shows whichever run wrote last, and the
-watermarks can end up split between the two `window_end` values.
+**A second trigger is queued**, not run in parallel: `pl_load_data` has
+concurrency 1. It starts when the first run finishes and reads its new
+watermarks, so it only re-copies the lookback window. Monitor's Run start for
+it is the trigger time, including the wait; its `window_end` is the real start.
 
 ## 3. Run the transformation
 
