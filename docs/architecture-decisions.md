@@ -1407,6 +1407,20 @@ writer.
   manifest, so it is never loaded. The manifest's run_id column still holds
   the Airflow run.
 
+### Amendment, 2026-10-03: row counts are checked against raw, not COPY_HISTORY
+
+- **Check.** For each manifest row in the load window, the rows in
+  `raw.<table>` whose `_source_file` is one of its files must equal its
+  `row_count`. Fewer is a missing or partial load, more is a double load.
+- **Why.** It checks the state, not a report of the process. It has no
+  retention limit (INFORMATION_SCHEMA.COPY_HISTORY keeps 14 days), a FORCE
+  reload shows up as a doubled count, and it does not matter how many COPY
+  statements loaded one export.
+- **COPY results** stay the per-file record for `pipeline_audit`.
+- **Supersedes:** "summing `rows_loaded` for its files from `COPY_HISTORY`"
+  in the 2026-09-28 amendment, and the Consequences bullet that COPY INTO's
+  `rows_loaded` must equal the manifest's row count. A mismatch is still FAIL.
+
 ## ADR-021: Cost Control by Suspending Compute, Not Destroying the Stack
 
 ### Status
