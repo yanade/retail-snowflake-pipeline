@@ -15,13 +15,9 @@ from pathlib import Path
 logger = setup_logging()
 
 
-# Matches generate_data.py's default --days 30, so a plain run covers the
-# same window as a default data generation.
-DEFAULT_LOOKBACK_DAYS = 30
+DEFAULT_LOOKBACK_DAYS = 30  # same window as generate_data.py's default --days 30
 
-# The free tier is rate limited per minute. Pacing requests keeps a normal
-# fetch under the limit; the retry settings are the safety net for when a
-# shared key or a longer range trips it anyway.
+# The free tier is rate limited per minute: pace requests, retry with backoff on 429
 REQUEST_DELAY_SECONDS = 1.0
 RATE_LIMIT_MAX_RETRIES = 3
 RATE_LIMIT_BACKOFF_SECONDS = 20
@@ -30,24 +26,23 @@ REQUEST_TIMEOUT_SECONDS = 10
 
 
 def load_config() -> dict:
-    """Load configuration from environment variables.
+    """
+    Load and validate the FX settings from the environment.
+
     Returns:
-        dict with keys:
-            - api_key (str): freecurrencyapi.com authentication key
-            - base_currency (str): currency to convert FROM, e.g. 'GBP'
-            - target_currencies (list[str]): currencies to convert TO,
-              e.g. ['USD', 'EUR', 'JPY']
+        Dict with api_key, base_currency, base_url, target_currencies, output_dir.
 
     Raises:
-        ValueError: if any required environment variable is missing or invalid"""
-    
-    load_dotenv()  # Load .env file if it exists
+        ValueError: If a required variable is missing.
+    """
+
+    load_dotenv()  # .env, if present
     api_key = os.getenv("EXCHANGE_RATE_API_KEY")
     base_currency = os.getenv("BASE_CURRENCY")
     base_url = os.getenv("EXCHANGE_RATE_BASE_URL")
     output_dir = os.getenv("OUTPUT_PATH")
 
-    # Validate all simple required variables in one place
+    # The required string settings
     required_vars = {
         "EXCHANGE_RATE_API_KEY": api_key,
         "BASE_CURRENCY": base_currency,
@@ -63,7 +58,7 @@ def load_config() -> dict:
         for cur in os.getenv("TARGET_CURRENCIES", "").split(",") if cur.strip()
         ]
 
-    # Separate check — different validation logic (list, not string)
+    # A list, so checked separately
     if not target_currencies:
         raise ValueError(
             "TARGET_CURRENCIES is not set or empty. Add it to your .env file."
@@ -90,21 +85,19 @@ def load_config() -> dict:
 
 def request_rates(base_url: str, params: dict, target_date: date) -> requests.Response:
     """
-    Issue a GET request to the FX API, retrying when it reports rate limiting.
+    GET the FX API, retrying on HTTP 429.
 
     Args:
-        base_url (str): endpoint URL, without query parameters
-        params (dict): query parameters, including the API key
-        target_date (date): the date being fetched, used only in log messages
+        base_url: Endpoint URL without query parameters.
+        params: Query parameters, including the API key.
+        target_date: Date being fetched, for log messages only.
 
     Returns:
-        requests.Response: the successful response
+        The successful response.
 
     Raises:
-        requests.HTTPError: for any non-retryable error status, or when the
-            rate limit persists across every retry. The message deliberately
-            omits the URL, because it carries the API key.
-        requests.Timeout: if a request exceeds REQUEST_TIMEOUT_SECONDS
+        requests.HTTPError: On an error status or a persistent rate limit, without the key-bearing URL.
+        requests.Timeout: If a request exceeds REQUEST_TIMEOUT_SECONDS.
     """
 
     for attempt in range(1, RATE_LIMIT_MAX_RETRIES + 1):
@@ -120,7 +113,7 @@ def request_rates(base_url: str, params: dict, target_date: date) -> requests.Re
                 "fetch a shorter date range."
             )
 
-        # Prefer the server's own guidance when it tells us how long to wait
+        # Retry-After wins when the server sends it
         wait_seconds = int(
             response.headers.get(
                 "Retry-After", RATE_LIMIT_BACKOFF_SECONDS * attempt
@@ -138,9 +131,7 @@ def request_rates(base_url: str, params: dict, target_date: date) -> requests.Re
     try:
         response.raise_for_status()
     except requests.HTTPError:
-        # requests puts the full request URL in this message, and the URL
-        # carries the API key. Re-raise without it, and suppress the original
-        # exception so the key cannot resurface in the chained traceback.
+        # The original message holds the URL with the API key; from None keeps it out of the traceback
         raise requests.HTTPError(
             f"FX API returned {response.status_code} for {target_date}."
         ) from None
@@ -149,32 +140,28 @@ def request_rates(base_url: str, params: dict, target_date: date) -> requests.Re
 
 
 def fetch_fx_rates(config: dict, target_date: date) -> dict:
-    """Fetch FX rates from freecurrencyapi.com for a specific date.
-        Calls the historical rates endpoint and extracts rates only for
-        the target currencies defined in config.
+    """
+    Fetch the target currencies' rates for one date.
 
     Args:
-        config (dict): configuration dictionary with keys:
-            - api_key (str): API authentication key
-            - base_currency (str): currency to convert FROM
-            - target_currencies (list[str]): currencies to convert TO
-        target_date (date): the date for which to fetch rates
+        config: Output of load_config().
+        target_date: Date to fetch.
 
     Returns:
-        dict: mapping of target currency to its exchange rate against the base currency
+        Mapping of target currency to its rate against the base currency.
 
     Raises:
-        requests.HTTPError: if the API returns a non-200 status code
-        ValueError: if the API response result is not 'success'
-        KeyError: if a target currency is missing from the response
-        requests.Timeout: if the API call exceeds the timeout limit"""
-    
+        requests.HTTPError: On an error status.
+        ValueError: If the response has no rates for the date.
+        KeyError: If a target currency is missing from the response.
+        requests.Timeout: If the call times out.
+    """
+
     api_key = config["api_key"]
     base_currency = config["base_currency"]
     target_currencies = config["target_currencies"]
 
-    # Pass query parameters to requests rather than building the URL by hand,
-    # so the API key is never part of a string this module formats or logs
+    # params, not a hand-built URL, so the key is never in a string this module formats
     base_url = config["base_url"]
     params = {
         "apikey": api_key,
@@ -188,13 +175,12 @@ def fetch_fx_rates(config: dict, target_date: date) -> dict:
     response = request_rates(base_url, params, target_date)
     data = response.json()
 
-    # Validate the API's own result field before processing rates
+    # No data field means the API returned an error payload
     if "data" not in data:
         raise ValueError(
             f"Unexpected API response for {target_date}: {data}"
         )
 
-    # Extract rates for the requested date
     date_key = target_date.isoformat()
     all_rates = data["data"].get(date_key, {})
 
@@ -203,7 +189,7 @@ def fetch_fx_rates(config: dict, target_date: date) -> dict:
             f"No rates found in API response for date {target_date}."
         )
 
-    # Extract only the currencies we need
+    # Keep only the requested currencies
     rates = {}
     for currency in target_currencies:
         if currency not in all_rates:
@@ -226,27 +212,23 @@ def get_rates_for_date_range(
         start_date: date,
         end_date: date
 ) -> dict:
-    
-    """
-    Fetch exchange rates for every date in a given range.
 
-    Calls fetch_fx_rates() for each date. If a single date fails due to
-    a timeout or missing data, it is skipped and logged — the loop
-    continues. If an unrecoverable HTTP error occurs, the function
-    raises immediately.
+    """
+    Fetch rates for every date in an inclusive range.
+
+    A timeout or missing currency skips that date; an HTTP error stops the run.
 
     Args:
-        config (dict): config dict returned by load_config()
-        start_date (date): first date to fetch, inclusive
-        end_date (date): last date to fetch, inclusive
+        config: Output of load_config().
+        start_date: First date, inclusive.
+        end_date: Last date, inclusive.
 
     Returns:
-        dict mapping date strings (YYYY-MM-DD) to rate dicts, e.g.
-        {"2011-01-15": {"USD": 1.5823, "EUR": 1.1742}, ...}
+        Mapping of ISO date to {currency: rate}.
 
     Raises:
-        requests.HTTPError: if the API returns an unrecoverable error
-        ValueError: if start_date is after end_date
+        requests.HTTPError: On an unrecoverable API error.
+        ValueError: If start_date is after end_date.
     """
     if start_date > end_date:
         raise ValueError(
@@ -259,34 +241,31 @@ def get_rates_for_date_range(
     while current_date <= end_date:
         try:
             rates = fetch_fx_rates(config, current_date)
-            # Store with ISO date string as key for easy JSON serialisation
-            all_rates[current_date.isoformat()] = rates
-        
+            all_rates[current_date.isoformat()] = rates  # ISO string key, so the dict serialises to JSON
+
         except requests.Timeout:
-            # Skip this date and keep going — timeout is recoverable
+            # Recoverable: skip this date
             logger.warning(
                 "Timeout fetching rates for %s. Skipping this date.",
                 current_date
             )
 
         except KeyError as e:
-            # Currency missing from response — skip and log
+            # Missing currency: skip this date
             logger.warning(
                 "Missing currency for %s: %s — skipping", current_date, e
             )
 
         except requests.HTTPError as e:
-            # HTTP error is unrecoverable — stop everything
+            # Unrecoverable: stop the run
             logger.error(
                 "HTTP error fetching rates for %s: %s", current_date, e
             )
             raise
 
-        # Move to the next day regardless of success or skip
         current_date += timedelta(days=1)
 
-        # Pace requests so a long range stays under the per-minute rate limit
-        # in the first place. No need to wait after the final date.
+        # Pace requests under the per-minute limit; no wait after the last date
         if current_date <= end_date:
             time.sleep(REQUEST_DELAY_SECONDS)
 
@@ -309,35 +288,23 @@ def save_rates_to_json(
 ) -> None:
 
     """
-    Save the fetched exchange rates dictionary to a JSON file.
-
-    Filename is built automatically from base currency, date range, and
-    current timestamp — a new file is created on every run, nothing is
-    overwritten.
+    Write the rates to a new timestamped JSON file; nothing is overwritten.
 
     Args:
-        rates (dict): exchange rates dict returned by get_rates_for_date_range()
-            e.g. {"2011-01-15": {"USD": 1.5823, "EUR": 1.1742}, ...}
-        output_dir (str): folder to write the file into,
-            e.g. "ingestion/api_ingest/output/"
-        base_currency (str): currency converted FROM, e.g. "GBP"
-            used in the filename so content is clear without opening the file
-        start_date (date): first date in the rates dict — used in filename
-        target_currencies (list[str]): currencies converted TO, e.g. ["USD", "EUR"]
-        included in output file metadata
-        end_date (date): last date in the rates dict — used in filename
-
-    Returns:
-        None
+        rates: Output of get_rates_for_date_range().
+        output_dir: Folder to write into.
+        base_currency: Base currency, used in the filename.
+        target_currencies: Target currencies, stored as metadata.
+        start_date: First date, used in the filename.
+        end_date: Last date, used in the filename.
 
     Raises:
-        OSError: if the file cannot be written due to permissions
+        OSError: If the file cannot be written.
     """
 
-    # Build timestamp string e.g. 20260611_143022
-    run_timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+    run_timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")  # e.g. 20260611_143022_123456
 
-    # Build filename e.g. fx_rates_GBP_2011-01-15_2011-01-17_20260611_143022.json
+    # e.g. fx_rates_GBP_2011-01-15_2011-01-17_<timestamp>.json
     filename = (
         f"fx_rates"
         f"_{base_currency}"
@@ -346,13 +313,9 @@ def save_rates_to_json(
         f"_{run_timestamp}.json"
     )
 
-    # Join folder path and filename into a single Path object
     output_file_path = Path(output_dir) / filename
-
-    # Create parent directories if they don't exist
     output_file_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Include metadata alongside rates for clarity
     output_payload = {
         "base_currency": base_currency,
         "target_currencies": target_currencies,
@@ -361,7 +324,6 @@ def save_rates_to_json(
         "rates": rates
     }
 
-    # Write the rates dict to the specified JSON file
     with open(output_file_path, "w", encoding="utf-8") as f:
         json.dump(output_payload, f, indent=2)
 
@@ -375,25 +337,16 @@ def upsert_rates_to_postgres(
     source_system: str = "freecurrencyapi",
 ) -> int:
     """
-    Upsert fetched exchange rates into retail_oltp.exchange_rates.
-
-    Flattens the {date: {currency: rate}} dict returned by
-    get_rates_for_date_range() into rows keyed by
-    (rate_date, base_currency_code, target_currency_code) — the same
-    idempotent key used in database/seed.py — so re-running a fetch for a
-    date that was already loaded updates the existing row instead of
-    duplicating it.
+    Upsert rates into retail_oltp.exchange_rates, updating a row only when it changed.
 
     Args:
-        rates (dict): mapping of ISO date string to {currency_code: rate},
-            e.g. {"2010-12-01": {"USD": 1.5619, "EUR": 1.1891}, ...}
-        database_url (str): PostgreSQL connection string
-        base_currency (str): currency code all rates are converted FROM
-        source_system (str): value stored in exchange_rates.source_system
+        rates: Mapping of ISO date to {currency: rate}.
+        database_url: PostgreSQL connection string.
+        base_currency: Currency all rates convert from.
+        source_system: Value stored in source_system.
 
     Returns:
-        int: number of rows upserted. Returns 0 without opening a database
-        connection when rates is empty.
+        Rows sent, or 0 without connecting when rates is empty.
     """
 
     rows = [
@@ -412,7 +365,7 @@ def upsert_rates_to_postgres(
         logger.info("No rates to upsert — skipping PostgreSQL write.")
         return 0
 
-    import psycopg  # imported lazily: only needed when --write-postgres is used
+    import psycopg  # lazy: only --write-postgres needs it
 
     with psycopg.connect(database_url) as connection:
         with connection.cursor() as cursor:
@@ -438,20 +391,22 @@ def upsert_rates_to_postgres(
                 set
                     exchange_rate = excluded.exchange_rate,
                     source_system = excluded.source_system
+                where (exchange_rates.exchange_rate, exchange_rates.source_system)
+                    is distinct from (excluded.exchange_rate, excluded.source_system)
                 """,
                 rows,
             )
 
-    logger.info("Upserted %d exchange rate rows into PostgreSQL.", len(rows))
+    logger.info("Sent %d exchange rate rows; unchanged ones are left untouched.", len(rows))
     return len(rows)
 
 
 def parse_args() -> argparse.Namespace:
     """
-    Parse command line arguments for the FX fetch run.
+    Parse the CLI arguments.
 
     Returns:
-        Namespace with start, end and write_postgres attributes.
+        Namespace with start, end and write_postgres.
     """
 
     parser = argparse.ArgumentParser(
@@ -459,12 +414,11 @@ def parse_args() -> argparse.Namespace:
     )
 
     default_end = datetime.now(timezone.utc).date()
-    # The range is inclusive at both ends, so subtract one less than the window length
-    default_start = default_end - timedelta(days=DEFAULT_LOOKBACK_DAYS - 1)
+    default_start = default_end - timedelta(days=DEFAULT_LOOKBACK_DAYS - 1)  # inclusive range: one less than the window
 
     parser.add_argument(
         "--start",
-        type=date.fromisoformat,  # argparse applies this to the raw string, so bad dates fail here
+        type=date.fromisoformat,  # a bad date fails at parse time
         default=default_start,
         help="First date to fetch, inclusive (YYYY-MM-DD).",
     )
@@ -489,11 +443,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     """
-    Fetch FX rates for a date range, save them as JSON, and optionally
-    upsert them into PostgreSQL.
+    Fetch a date range, save it as JSON, and optionally upsert it into PostgreSQL.
 
     Raises:
-        RuntimeError: if no rates could be fetched for any date in the range.
+        RuntimeError: If no date in the range could be fetched.
     """
 
     args = parse_args()
@@ -501,9 +454,7 @@ def main() -> None:
 
     rates = get_rates_for_date_range(config, args.start, args.end)
 
-    # An empty dict means every date in the range failed. That is a
-    # configuration or quota problem, not a normal outcome, so stop here
-    # rather than writing an empty file or an empty table.
+    # Every date failed: a key or quota problem, so stop before writing anything
     if not rates:
         raise RuntimeError(
             f"No rates fetched for {args.start} to {args.end}. "

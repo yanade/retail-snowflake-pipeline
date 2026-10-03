@@ -214,3 +214,31 @@ def test_upsert_rates_to_postgres_no_rows_skips_database():
     )
 
     assert row_count == 0
+
+
+def test_upsert_rates_to_postgres_skips_unchanged_rates(sample_rates):
+    """
+    The conflict update only fires when the rate or source changed, so a
+    re-fetch does not bump updated_at. Text-level guard: the behaviour itself
+    is verified against a real PostgreSQL (incremental runbook).
+    """
+    mock_cursor = MagicMock()
+    mock_connection = MagicMock()
+    mock_connection.__enter__.return_value = mock_connection
+    mock_connection.cursor.return_value.__enter__.return_value = mock_cursor
+    mock_psycopg = MagicMock()
+    mock_psycopg.connect.return_value = mock_connection
+
+    with patch.dict("sys.modules", {"psycopg": mock_psycopg}):
+        upsert_rates_to_postgres(
+            rates=sample_rates,
+            database_url="postgresql://example",
+            base_currency="GBP",
+            source_system="freecurrencyapi",
+        )
+
+    sql = " ".join(mock_cursor.executemany.call_args.args[0].split())  # collapse the SQL's line breaks and indentation
+    assert (
+        "where (exchange_rates.exchange_rate, exchange_rates.source_system) "
+        "is distinct from (excluded.exchange_rate, excluded.source_system)"
+    ) in sql
