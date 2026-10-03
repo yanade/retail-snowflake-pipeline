@@ -6,6 +6,10 @@
 				"name": "set_window_end",
 				"type": "SetVariable",
 				"dependsOn": [],
+				"policy": {
+					"secureOutput": false,
+					"secureInput": false
+				},
 				"userProperties": [],
 				"typeProperties": {
 					"variableName": "window_end",
@@ -237,6 +241,7 @@
 				}
 			}
 		],
+		"concurrency": 1,
 		"variables": {
 			"window_end": {
 				"type": "String"
