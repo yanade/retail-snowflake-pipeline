@@ -1456,3 +1456,49 @@ is a worse trade than watching a resource monitor.
 - `rebuild-runbook.md` becomes a recovery procedure rather than a routine one.
 - Cost discipline now depends on the resource monitor firing, which makes its
   `NOTIFY_USERS` recipient a real dependency rather than decoration.
+
+---
+
+## ADR-022: FX Rates Are Source-Owned Data
+
+### Status
+
+Accepted
+
+### Context
+
+FX rates come from freecurrencyapi.com. `fetch_fx_rates.py --write-postgres`
+writes them into `retail_oltp.exchange_rates`, and ADF extracts that table like
+any other. No ADR said who owns the table, and CLAUDE.md drew the API feeding
+ADF directly. The gap surfaced as a bug: the upsert updated unchanged rows, the
+trigger bumped `updated_at`, and every re-fetch looked like a change downstream.
+
+### Decision
+
+`exchange_rates` belongs to the source system. `fetch_fx_rates.py` plays the
+source's rate feed, the role a treasury process plays for an ERP's currency
+table, not a pipeline stage. The pipeline only reads the table. A writer into a
+source table must not touch unchanged rows, so the upsert updates a row only
+when its rate or source changed (`is distinct from`).
+
+### Alternatives Considered
+
+- **API straight to raw, one file per `rate_date`:** idempotent by overwrite,
+  and the pipeline never writes to a source, but it changes the raw layout, the
+  primary key, curated, the served contract and the Snowflake raw table.
+- **`on conflict do nothing`:** simpler, but freezes a rate the provider later
+  corrects.
+
+### Rationale
+
+It matches how retail systems hold rates, and keeps one extraction path, the
+watermark, for every source table.
+
+### Consequences
+
+- A re-fetch is harmless; an explicit range only saves API calls.
+- A provider correction flows downstream as a real change.
+- Verified on Azure PostgreSQL, 2026-10-03: an identical re-fetch kept
+  `updated_at`, a changed rate was restored and re-stamped.
+- In production the data team would not run this feed. It lives in
+  `ingestion/api_ingest/` only because the project builds its own source.

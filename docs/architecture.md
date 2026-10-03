@@ -37,9 +37,12 @@ alternative approaches are documented in `architecture-decisions.md`.
 
 ```
 Sources
+  freecurrencyapi.com API
+        │  fetch_fx_rates.py, the source's rate feed (ADR-022)
+        ▼
   PostgreSQL retail_oltp  ──┐
-  freecurrencyapi.com API ──┼──▶  Azure Data Factory  (watermark-based incremental)
-  Terraform + GitHub      ──┘              │
+  Terraform + GitHub      ──┴──▶  Azure Data Factory  (watermark-based incremental)
+                                          │
                                           ▼
                                ADLS Gen2  (3 zones)
                          Raw zone │ Curated zone │ Served zone
