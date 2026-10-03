@@ -2,12 +2,20 @@
 
 import argparse
 import logging
-
 from collections.abc import Sequence
+
 from snowflake.connector import DictCursor
 
 from loading.manifest_reader import LOAD_WINDOW_DAYS, ManifestExport, read_manifest
-from loading.raw_loader import ExportCheck, connect_snowflake, copy_table, fetch_loaded_counts, reconcile
+from loading.raw_loader import (
+    ExportCheck,
+    connect_snowflake,
+    copy_table,
+    fetch_loaded_counts,
+    fetch_raw_columns,
+    find_schema_drift,
+    reconcile,
+)
 from utils.logger import setup_logging
 
 logger = setup_logging()
@@ -44,7 +52,8 @@ def load_raw(window_days: int = LOAD_WINDOW_DAYS, dry_run: bool = False) -> list
         One ExportCheck per export; empty for a dry run or an empty window.
 
     Raises:
-        RuntimeError: If any export is not in raw exactly once.
+        RuntimeError: If any raw table differs from the column contract, before anything is loaded,
+            or if any export is not in raw exactly once.
     """
     exports = read_manifest(window_days)
     files_by_table = group_files_by_table(exports)
@@ -58,6 +67,9 @@ def load_raw(window_days: int = LOAD_WINDOW_DAYS, dry_run: bool = False) -> list
 
     loaded_counts: dict[str, int] = {}
     with connect_snowflake() as conn, conn.cursor(DictCursor) as cursor:
+        drift = find_schema_drift(fetch_raw_columns(cursor))
+        if drift:
+            raise RuntimeError(f"Raw tables differ from the column contract, nothing loaded: {drift}")
         for table, files in files_by_table.items():
             loads = copy_table(cursor, table, files)
             new = [load for load in loads if load.status == "LOADED"]

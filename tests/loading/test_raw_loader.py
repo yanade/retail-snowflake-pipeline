@@ -1,4 +1,4 @@
-"""Unit tests for the raw loader: COPY text, COPY result parsing, batching, reconciliation, env checks."""
+"""Unit tests for the raw loader: COPY text, COPY result parsing, batching, reconciliation, schema drift, env checks."""
 
 from datetime import datetime, timezone
 
@@ -8,13 +8,17 @@ from loading import raw_loader
 from loading.manifest_reader import ManifestExport
 from loading.raw_loader import (
     MAX_FILES_PER_COPY,
+    RAW_COLUMNS,
     RAW_TABLES,
     ExportCheck,
     FileLoad,
+    SchemaDrift,
     build_copy_sql,
     build_count_sql,
     copy_table,
     fetch_loaded_counts,
+    fetch_raw_columns,
+    find_schema_drift,
     parse_copy_result,
     reconcile,
 )
@@ -64,12 +68,29 @@ def _export(files: tuple[str, ...] = CUSTOMERS_FILES, row_count: int = 1420) -> 
     )
 
 
+def _deployed() -> dict[str, set[str]]:
+    """All 12 tables as create_raw_tables.sql deploys them: upper-case names plus metadata."""
+    return {
+        table.upper(): {name.upper() for name in (*columns, "_source_file", "_loaded_at")}
+        for table, columns in RAW_COLUMNS.items()
+    }
+
+
+# Column contract
+
+def test_raw_columns_match_source_schemas():
+    """The loader's column contract equals the source contract, table by table, in order."""
+    assert {table: list(columns) for table, columns in RAW_COLUMNS.items()} == {
+        table: schema.fieldNames() for table, schema in SOURCE_SCHEMAS.items()
+    }
+
+
+def test_raw_tables_are_the_contract_tables():
+    """The COPY whitelist is derived from the column contract, not kept by hand."""
+    assert RAW_TABLES == set(RAW_COLUMNS)
+
+
 # build_copy_sql
-
-def test_raw_tables_match_source_schemas():
-    """The loader's whitelist and the source contract name the same 12 tables."""
-    assert RAW_TABLES == set(SOURCE_SCHEMAS)
-
 
 def test_copy_names_every_file_in_order():
     """Both files of a two-part export, quoted, in manifest order."""
@@ -171,6 +192,45 @@ def test_export_not_loaded_exactly_once_fails(counts, actual):
     check = reconcile([_export()], counts)[0]
     assert check.actual == actual
     assert not check.ok
+
+
+# fetch_raw_columns, find_schema_drift
+
+def test_deployed_ddl_has_no_drift():
+    """The schema the DDL creates is exactly the contract."""
+    assert find_schema_drift(_deployed()) == []
+
+
+def test_extra_and_missing_columns_are_reported():
+    """A column renamed in Snowsight shows up on both sides."""
+    actual = _deployed()
+    actual["STORES"] = (actual["STORES"] - {"CITY"}) | {"TOWN"}
+    assert find_schema_drift(actual) == [SchemaDrift("stores", missing=("CITY",), extra=("TOWN",))]
+
+
+def test_quoted_lower_case_column_is_drift():
+    """A table rebuilt from INFER_SCHEMA has quoted lower-case names; COPY would load it, dbt could not."""
+    actual = _deployed()
+    actual["ORDERS"] = (actual["ORDERS"] - {"ORDER_ID"}) | {"order_id"}
+    assert find_schema_drift(actual) == [SchemaDrift("orders", missing=("ORDER_ID",), extra=("order_id",))]
+
+
+def test_missing_table_reports_every_column():
+    """A table that was never deployed is missing all its columns, metadata included."""
+    actual = _deployed()
+    del actual["SUPPLIERS"]
+    (drift,) = find_schema_drift(actual)
+    assert drift.table == "suppliers" and "_SOURCE_FILE" in drift.missing and drift.extra == ()
+
+
+def test_fetch_raw_columns_groups_by_table():
+    """Rows become one set of column names per table, case untouched."""
+    cursor = _ScriptedCursor([[
+        {"table_name": "STORES", "column_name": "STORE_ID"},
+        {"table_name": "STORES", "column_name": "CITY"},
+        {"table_name": "ORDERS", "column_name": "order_id"},
+    ]])
+    assert fetch_raw_columns(cursor) == {"STORES": {"STORE_ID", "CITY"}, "ORDERS": {"order_id"}}
 
 
 # connect_snowflake
