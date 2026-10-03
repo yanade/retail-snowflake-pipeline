@@ -48,7 +48,10 @@ GRANT CREATE SCHEMA ON DATABASE ecommerce_db TO ROLE retail_dev;
 GRANT ALL PRIVILEGES ON SCHEMA ecommerce_db.raw   TO ROLE retail_dev;
 GRANT ALL PRIVILEGES ON SCHEMA ecommerce_db.audit TO ROLE retail_dev;
 
-GRANT ROLE retail_dev TO USER VIKASHEV;
+GRANT ROLE retail_dev TO USER <% snowflake_user %>;
+
+-- ADR-020: timestamps are UTC, so the pipeline user's sessions must be too
+ALTER USER <% snowflake_user %> SET TIMEZONE = 'UTC';
 
 -- ── Cost guard ────────────────────────────────────────────────────────────
 
@@ -56,7 +59,7 @@ CREATE RESOURCE MONITOR IF NOT EXISTS retail_dev_monitor
     WITH CREDIT_QUOTA = 50
     FREQUENCY = MONTHLY
     START_TIMESTAMP = IMMEDIATELY
-    NOTIFY_USERS = ( VIKASHEV )
+    NOTIFY_USERS = ( <% snowflake_user %> )
     TRIGGERS
         ON 75  PERCENT DO NOTIFY
         ON 100 PERCENT DO SUSPEND
