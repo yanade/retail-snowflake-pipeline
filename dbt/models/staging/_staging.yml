@@ -13,6 +13,90 @@ models:
       - name: order_id
         data_tests: [not_null, unique_version, one_current_version]
 
+  - name: stg_customers
+    description: "Current state of each customer, one row per customer_id."
+    columns:
+      - name: customer_id
+        data_tests: [unique, not_null]
+
+  - name: stg_customers_history
+    description: "Every version of every customer, valid over [dbt_valid_from, dbt_valid_to)."
+    columns:
+      - name: customer_id
+        data_tests: [not_null, unique_version, one_current_version]
+
+  - name: stg_products
+    description: "Current state of each product, one row per product_id."
+    columns:
+      - name: product_id
+        data_tests: [unique, not_null]
+
+  - name: stg_products_history
+    description: "Every version of every product, valid over [dbt_valid_from, dbt_valid_to)."
+    columns:
+      - name: product_id
+        data_tests: [not_null, unique_version, one_current_version]
+
+  - name: stg_payments
+    description: "Current state of each payment, one row per payment_id."
+    columns:
+      - name: payment_id
+        data_tests: [unique, not_null]
+
+  - name: stg_payments_history
+    description: "Every version of every payment, valid over [dbt_valid_from, dbt_valid_to)."
+    columns:
+      - name: payment_id
+        data_tests: [not_null, unique_version, one_current_version]
+
+  - name: stg_order_items
+    description: "Current state of each order line, one row per order_item_id."
+    columns:
+      - name: order_item_id
+        data_tests: [unique, not_null]
+
+  - name: stg_customer_addresses
+    description: "Current state of each customer address, one row per address_id."
+    columns:
+      - name: address_id
+        data_tests: [unique, not_null]
+
+  - name: stg_exchange_rates
+    description: "Current state of each exchange rate, one row per exchange_rate_id."
+    columns:
+      - name: exchange_rate_id
+        data_tests: [unique, not_null]
+
+  - name: stg_currencies
+    description: "Current state of each currency, one row per currency_code."
+    columns:
+      - name: currency_code
+        data_tests: [unique, not_null]
+
+  - name: stg_product_categories
+    description: "Current state of each product category, one row per category_id."
+    columns:
+      - name: category_id
+        data_tests: [unique, not_null]
+
+  - name: stg_suppliers
+    description: "Current state of each supplier, one row per supplier_id."
+    columns:
+      - name: supplier_id
+        data_tests: [unique, not_null]
+
+  - name: stg_stores
+    description: "Current state of each store, one row per store_id."
+    columns:
+      - name: store_id
+        data_tests: [unique, not_null]
+
+  - name: stg_employees
+    description: "Current state of each employee, one row per employee_id."
+    columns:
+      - name: employee_id
+        data_tests: [unique, not_null]
+
 unit_tests:
   - name: stg_orders_history_dedupes_and_chains_versions
     model: stg_orders_history
