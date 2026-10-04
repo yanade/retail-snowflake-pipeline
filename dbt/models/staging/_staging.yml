@@ -1,0 +1,29 @@
+version: 2
+
+models:
+  - name: stg_orders
+    description: "Current state of each order, one row per order_id."
+    columns:
+      - name: order_id
+        data_tests: [unique, not_null]
+
+  - name: stg_orders_history
+    description: "Every version of every order, valid over [dbt_valid_from, dbt_valid_to)."
+    columns:
+      - name: order_id
+        data_tests: [not_null, unique_version, one_current_version]
+
+unit_tests:
+  - name: stg_orders_history_dedupes_and_chains_versions
+    model: stg_orders_history
+    given:
+      - input: source('raw', 'orders')
+        rows:
+          # same version loaded twice: only the earliest load (a) may survive
+          - {order_id: 42, order_status: PENDING, updated_at: "2026-09-17 20:41:00", _loaded_at: "2026-10-04 10:00:00", _source_file: orders/a.parquet}
+          - {order_id: 42, order_status: PENDING, updated_at: "2026-09-17 20:41:00", _loaded_at: "2026-10-05 10:00:00", _source_file: orders/c.parquet}
+          - {order_id: 42, order_status: SHIPPED, updated_at: "2026-10-02 12:05:00", _loaded_at: "2026-10-04 10:00:00", _source_file: orders/b.parquet}
+    expect:
+      rows:
+        - {order_id: 42, order_status: PENDING, _source_file: orders/a.parquet, dbt_valid_from: "2026-09-17 20:41:00", dbt_valid_to: "2026-10-02 12:05:00"}
+        - {order_id: 42, order_status: SHIPPED, _source_file: orders/b.parquet, dbt_valid_from: "2026-10-02 12:05:00", dbt_valid_to: null}
