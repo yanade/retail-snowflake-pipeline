@@ -1,0 +1,15 @@
+
+retail:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH') }}"   # absolute path, no ~
+      role: "{{ env_var('SNOWFLAKE_ROLE') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
+      schema: dbt_dev              # never SNOWFLAKE_SCHEMA: that is raw
+      threads: 4
+      query_tag: dbt               # makes dbt's queries findable in QUERY_HISTORY
