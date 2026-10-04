@@ -1,0 +1,16 @@
+
+name: retail
+version: "1.0.0"
+profile: retail                    # which block of profiles.yml to use
+require-dbt-version: [">=1.12.0", "<2.0.0"]
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+clean-targets: ["target", "dbt_packages"]   # what `dbt clean` deletes
+
+models:
+  retail:                          # must match `name` above
+    staging:
+      +materialized: view          # recomputed from all of raw on every read
+      +schema: staging             # lands in <profile schema>_staging
