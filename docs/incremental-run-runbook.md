@@ -1,9 +1,9 @@
 # Incremental Run Runbook
 
 How to simulate a day of source activity and watch the incremental pipeline
-handle it, from Postgres to Snowflake raw. This exercises the watermark, the
+handle it, from Postgres to dbt staging. This exercises the watermark, the
 lookback window, `dedupe()`, the MERGE guard, dead-letter deduplication, the
-CDF export and the manifest-driven COPY on real data.
+CDF export, the manifest-driven COPY and staging's change-log dedupe on real data.
 
 `rebuild-runbook.md` covers the cold start. This one assumes everything is
 already deployed and loaded at least once, including one `full_reload` export.
@@ -27,6 +27,13 @@ Expect 45 to 60 minutes, most of it waiting on ADF and Databricks jobs.
 - `venv` active, and `.env` holding `DATABRICKS_HOST`, `DATABRICKS_HTTP_PATH`,
   `DATABRICKS_TOKEN` and `SNOWFLAKE_CONNECTION_NAME` for step 6. The token
   expires after 30 days: an HTTP 403 on the manifest read means renew it.
+
+- `venv-dbt` built once, separate from `venv` because dbt needs protobuf 6 and
+  PySpark does not, and `SNOWFLAKE_PRIVATE_KEY_PATH` in `.env` for step 7:
+
+  ```bash
+  python3.13 -m venv venv-dbt && ./venv-dbt/bin/pip install -r dbt/requirements.txt
+  ```
 
 ## 1. Create new and changed rows
 
@@ -191,7 +198,37 @@ every table.
 - an export older than 7 days is never loaded: load within the window
   (ADR-020).
 
-## 7. Stop the source
+## 7. Build dbt staging
+
+```bash
+set -a; source .env; set +a
+```
+
+```bash
+cd dbt && ../venv-dbt/bin/dbt build
+```
+
+dbt reads `.env` only through the shell, so export it in the same terminal.
+`dbt build` runs the source tests, then for each staging model its unit test,
+the view itself in `DBT_DEV_STAGING`, and its grain tests. Raw is the change
+log; staging dedupes it on `(pk, updated_at)` and derives SCD2 intervals with
+`lead()` (ADR-020 History).
+
+Expected: `PASS=77` (24 source tests, 1 unit test, 16 views, 36 grain tests).
+The count is fixed; the row counts behind it change with every run.
+
+**If it fails:**
+
+- `Env var required but not provided`: `.env` not exported in this terminal,
+  or the variable is missing from `.env` (not `.env.example`).
+- a source `not_null` test: raw has a row without its key or `updated_at`.
+  The loader is at fault, not dbt.
+- a grain test (`unique`, `unique_version`, `one_current_version`): its SQL in
+  `target/compiled/` returns the offending keys; run it in Snowsight.
+- `syntax error ... unexpected 'select'` after editing the macro: unbalanced
+  brackets. `dbt/logs/dbt.log` holds the exact SQL sent.
+
+## 8. Stop the source
 
 ```bash
 az postgres flexible-server stop --name retail-pipeline-dev-pg --resource-group retail-pipeline-dev-rg
@@ -221,6 +258,11 @@ triggered twice by accident and the runs overlapped.
 | raw (Snowflake), first load | 22 files, 18 exports, all `OK` |
 | raw (Snowflake), rerun | 22 `LOAD_SKIPPED`, 18 `OK` |
 | raw, orders | 1594 rows: 1537 snapshot + 57 CDF |
+| staging, orders | 1594 versions, 25 closed, 1569 current |
+| staging, customers | 1451 versions, 1451 current |
+| staging, products | 10 versions, 10 current |
+| staging, payments | 1547 versions, 1547 current |
+| `dbt build` | `PASS=77` |
 | dead_letter, before the fixes | 624 to 665: 14 new bad rows stored twice, plus 13 BOM rows |
 | dead_letter, rebuilt after them | 638 (616 order_items + 22 payments), still 638 on a second run |
 
