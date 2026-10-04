@@ -33,3 +33,9 @@ session.sh
 
 # Generated docs — not part of source
 docs/adls_upload_case_study.html
+
+venv-dbt/
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
+dbt/.user.yml
