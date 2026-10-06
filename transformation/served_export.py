@@ -15,9 +15,26 @@ from pyspark.sql import functions as F
 
 from transformation.curated_writer import curated_path
 from transformation.schemas.source_schemas import get_source_schema
+from transformation.dead_letter import DEAD_LETTER_COLUMNS, DEAD_LETTER_TABLE, dead_letter_path
 
 CHANGE_TYPE_COLUMN = "_change_type"
 EXPORTED_CHANGE_TYPES = ("insert", "update_postimage")  # the state after each change
+
+
+def export_source(curated_root: str, table: str) -> tuple[str, list[str]]:
+    """
+    Delta path and columns of one exported table.
+
+    Args:
+        curated_root: Root of the curated zone.
+        table: Source table name, or dead_letter.
+
+    Returns:
+        (path, columns); dead_letter has its own location and shape (ADR-012).
+    """
+    if table == DEAD_LETTER_TABLE:
+        return dead_letter_path(curated_root), list(DEAD_LETTER_COLUMNS)
+    return curated_path(curated_root, table), get_source_schema(table).fieldNames()  # unknown name fails here
 
 
 def read_snapshot(
@@ -35,11 +52,12 @@ def read_snapshot(
     Returns:
         Every row of the table at that version, source columns only.
     """
+    path, columns = export_source(curated_root, table)
     return (
         spark.read.format("delta")
         .option("versionAsOf", version)
-        .load(curated_path(curated_root, table))
-        .select(*get_source_schema(table).fieldNames())
+        .load(path)
+        .select(*columns)
     )
 
 
@@ -66,14 +84,15 @@ def read_changes(
     Returns:
         Inserted rows and the new state of updated rows, source columns only.
     """
+    path, columns = export_source(curated_root, table)
     return (
         spark.read.format("delta")
         .option("readChangeFeed", "true")
         .option("startingVersion", start_version)
         .option("endingVersion", end_version)
-        .load(curated_path(curated_root, table))
+        .load(path)
         .where(F.col(CHANGE_TYPE_COLUMN).isin(*EXPORTED_CHANGE_TYPES))
-        .select(*get_source_schema(table).fieldNames())  # also drops the CDF columns
+        .select(*columns)  # also drops the CDF columns
     )
 
 
@@ -89,7 +108,8 @@ def curated_state(spark: SparkSession, curated_root: str, table: str) -> tuple[i
     Returns:
         (version, table_id); the version is what the export pins and reads.
     """
-    delta_table = DeltaTable.forPath(spark, curated_path(curated_root, table))
+    path, _ = export_source(curated_root, table)
+    delta_table = DeltaTable.forPath(spark, path)
     version = delta_table.history(1).first()["version"]  # latest commit only
     table_id = delta_table.detail().first()["id"]
     return version, table_id

@@ -186,3 +186,40 @@ def test_rebuilt_curated_table_gets_a_new_id(spark: SparkSession, tmp_path: Path
 
     assert new_version == 0
     assert new_id != old_id
+
+
+from transformation.dead_letter import DEAD_LETTER_COLUMNS, DEAD_LETTER_TABLE, write_dead_letter
+
+REJECTED_SCHEMA = (
+    "order_item_id long, updated_at timestamp, _dq_errors array<string>, "
+    "_raw_payload string, _corrupt_record string"
+)
+
+
+def _rejected(spark: SparkSession, key: int) -> DataFrame:
+    """One rejected order_items row, shaped like split_valid_rejected() output."""
+    return spark.createDataFrame(
+        [(key, EARLIER, ["zero_quantity"], f'{{"order_item_id":"{key}"}}', None)], REJECTED_SCHEMA
+    )
+
+
+def test_dead_letter_snapshot_has_dead_letter_columns(spark: SparkSession, tmp_path: Path) -> None:
+    """dead_letter is exported from its own path, in its own shape."""
+    curated_root = str(tmp_path)
+    write_dead_letter(spark, _rejected(spark, 1), "order_items", curated_root)  # version 0
+
+    snapshot = read_snapshot(spark, curated_root, DEAD_LETTER_TABLE, version=0)
+
+    assert snapshot.columns == list(DEAD_LETTER_COLUMNS)
+    assert snapshot.count() == 1
+
+
+def test_dead_letter_changes_are_read_through_cdf(spark: SparkSession, tmp_path: Path) -> None:
+    """A later reject arrives through CDF; the earlier one is not exported again."""
+    curated_root = str(tmp_path)
+    write_dead_letter(spark, _rejected(spark, 1), "order_items", curated_root)  # version 0
+    write_dead_letter(spark, _rejected(spark, 2), "order_items", curated_root)  # version 1
+
+    changes = read_changes(spark, curated_root, DEAD_LETTER_TABLE, start_version=1, end_version=1)
+
+    assert [row["source_key"] for row in changes.collect()] == ["2"]
