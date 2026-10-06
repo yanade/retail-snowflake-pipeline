@@ -1,0 +1,2 @@
+google-pso-data-validator==8.10.0
+snowflake-sqlalchemy==1.11.1
