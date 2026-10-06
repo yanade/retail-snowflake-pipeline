@@ -564,7 +564,7 @@ Consequences:
 
 ---
 
-## ADR-012: FX Conversion via GBP Cross Rates, and an Interim Dead-Letter Location
+## ADR-012: FX Conversion to GBP, and an Interim Dead-Letter Location
 
 ### Status
 
@@ -572,7 +572,7 @@ Accepted
 
 Amended on 2026-09-28 by ADR-020. FX conversion moves from Databricks to dbt,
 so the Databricks stage no longer joins `exchange_rates` and cannot detect a
-missing rate. The cross-rate formula and the rule against loading a NULL
+missing rate. The conversion formula and the rule against loading a NULL
 measure are unchanged.
 
 Missing rates are caught in two places instead. They are prevented:
@@ -590,17 +590,14 @@ dashboard.
 
 ### Context
 
-Two specifications disagree with the data.
-
 `ingestion/api_ingest/fetch_fx_rates.py` fetches with `BASE_CURRENCY=GBP`,
 so every row in `retail_oltp.exchange_rates` is GBP-based: the rate answers
 "how many units of the target currency per one GBP".
 
-The README describes converting order values to USD. But orders are not
-denominated in GBP. `database/seed.py` seeds stores in GB, DE and CA, and
-`generate_data.py` sets `orders.currency_code` from `store.currency_code`.
-So the fact table contains GBP, EUR and CAD orders, and a direct
-"GBP amount times GBP-to-USD rate" join is wrong for most of them.
+Orders are not all in GBP. `database/seed.py` seeds stores in GB, DE, FR and
+CA, and `generate_data.py` sets `orders.currency_code` from the store's
+country. The fact table therefore holds GBP, EUR and CAD orders, and summing
+their amounts as they are adds pounds to euros.
 
 Separately, `dead_letter` is specified as a Snowflake table. Snowflake does
 not exist yet, and the Databricks stage needs somewhere to put rejected
@@ -608,26 +605,29 @@ records now.
 
 ### Decision
 
-**FX direction.** Exchange rates remain GBP-based, one base currency for the
-whole table. An order in currency `C` converts to USD by cross rate:
+**Reporting currency.** Every amount is reported in GBP, the retailer's home
+currency and the base of the rates. An order in currency `C` converts by:
 
 ```
-usd_per_C = rate(GBP -> USD) / rate(GBP -> C)
+gbp_per_C = 1 / rate(GBP -> C)
 ```
 
-For `C = GBP` the denominator is 1 by definition and the GBP-to-USD rate is
-used directly.
+For `C = GBP` the rate is 1 by definition. The source cannot store that row
+(`base_currency_code <> target_currency_code`), so dbt adds it for each day.
 
-**Fact columns.** `CLAUDE.md`'s `unit_price_gbp` and `total_gbp` are renamed
-to `unit_price_original` and `total_original`, alongside an explicit
-`currency_code` column. The old names assert a currency the data does not
-have. `fx_rate_to_usd` holds the derived cross rate actually applied, so
-every converted value is reproducible from the row itself.
+dbt computes the general cross rate `rate(GBP -> R) / rate(GBP -> C)`, with
+the base and the reporting currency `R` as vars (`fx_base_currency`,
+`fx_reporting_currency`). Reporting in another currency is a config change.
+
+**Fact columns.** `unit_price_original` and `total_original` keep the amount
+in the order's own `currency_code`. `fx_rate_to_gbp` holds the rate actually
+applied and `total_gbp` the converted amount, so every converted value is
+reproducible from the row itself.
 
 **Missing rates.** If no rate exists for a given `(rate_date, currency)`,
-the row is routed to dead-letter with `error_reason = 'missing_fx_rate'`.
-It is not loaded with a NULL `total_usd`, because a NULL measure silently
-understates every downstream sum.
+the row is routed to `fact_sales_rejected` with
+`error_reason = 'missing_fx_rate'`. It is not loaded with a NULL `total_gbp`,
+because a NULL measure silently understates every downstream sum.
 
 **Dead-letter location.** `dead_letter` is a Delta table in ADLS at
 `curated/_dead_letter/`, registered as `retail_dev.ops.dead_letter`, until
@@ -637,30 +637,26 @@ Snowflake's `VARIANT` via `PARSE_JSON` when the table migrates.
 
 ### Alternatives Considered
 
-**Refetch rates with each order currency as base.**
-Removes the cross-rate arithmetic, but multiplies API calls by the number of
-currencies, and independently fetched bases can disagree slightly, so
-converting EUR to USD directly and via GBP would give different answers.
-
-**Store only GBP totals.**
-Matches the original column names, but misstates every non-GBP order. The
-column names were the error, not the data.
-
-**Allow NULL `total_usd` when a rate is missing.**
-Simplest to implement and the failure is invisible, which is exactly the
-objection.
+- **Report in USD via cross rates:** every currency then depends on the USD
+  rate, so one missing USD rate rejects a whole day.
+- **Fetch rates with each order currency as base:** one API call per
+  currency, and independent bases can disagree slightly.
+- **Store only `total_gbp`:** loses what the customer actually paid, and a
+  wrong rate becomes unrecoverable.
+- **Allow NULL `total_gbp` when a rate is missing:** simplest, and the
+  failure is invisible.
 
 ### Consequences
 
-- Notebook 02 needs `exchange_rates` pivoted or self-joined, because two
-  rates for the same date are required to compute one cross rate.
-- `CLAUDE.md`'s star schema section needs its column names updated.
+- GBP orders never miss a rate; `missing_fx_rate` can only affect EUR and CAD
+  orders.
 - Migrating `dead_letter` to Snowflake is a known future task, and the
   `STRING`-holding-JSON choice exists specifically to make it cheap.
-- Because the real API returned rates for all 33 days including weekends,
-  no `missing_fx_rate` rejections will occur naturally with the current
-  data. The path still needs a test, which means seeding a gap deliberately.
-- DVT should assert that every served row has a non-null `fx_rate_to_usd`.
+- The API returns rates for every day including weekends, so no
+  `missing_fx_rate` rejection occurs with the current data. The
+  `int_order_lines_routed` unit test covers the path instead.
+- `fact_sales.fx_rate_to_gbp` and `total_gbp` are `not_null`-tested on every
+  build (ADR-024).
 
 ---
 
@@ -1072,7 +1068,7 @@ developer laptop runs Europe/London; Databricks serverless runs `Etc/UTC`
 (measured 2026-09-17). `2026-08-26T23:30:00Z` is the 26th in UTC and the 27th
 in London during summer. The FX join (ADR-012) matches
 `to_date(order_date)` to `rate_date`, so the two environments would pick
-different days' rates and produce different USD totals, with no error.
+different days' rates and produce different GBP totals, with no error.
 
 ### Decision
 
@@ -1565,3 +1561,59 @@ already lived only in Git, and the rebuild already deploys them with Publish.
 - A second environment is the trigger for parameterised ARM deployment.
 - Terraform no longer manages the linked services, so `terraform destroy`
   leaves them to go with the factory.
+
+---
+
+## ADR-024: The Mart Layer in dbt
+
+### Status
+
+Accepted
+
+### Context
+
+ADR-011, ADR-012 and ADR-013 fixed the grain, the FX formula and the dimension
+shape before dbt existed. Building the marts settled what they left open: which
+dimensions, how keys are made, where unloadable lines go, and how the fact
+stays correct when it loads incrementally.
+
+### Decision
+
+- **Shape.** `fact_sales` with `dim_customer`, `dim_product`, `dim_store` and
+  `dim_date`. `dim_store` is new: every sale has exactly one store, and the
+  store has attributes of its own. An employee dimension is deferred; its key
+  is already on the order.
+- **Keys.** A dimension key is the source id. Marts rebuild every run, so a
+  sequence would renumber and orphan the fact. `-1` is the unknown customer
+  (ADR-013). There is no unknown store: a sale without a channel is an error,
+  and `not_null` catches it because `relationships` skips nulls.
+- **Type 1 dimensions.** "As of" questions use the staging history models.
+- **Routing.** `int_order_lines_routed` gives each line an `error_reason`,
+  `missing_order` or `missing_fx_rate`. `fact_sales` takes the nulls,
+  `fact_sales_rejected` the rest, and a test proves every line lands once.
+- **Measure.** `total_original` is `quantity * unit_price`: gross, before
+  discount, ex VAT. `total_gbp` is rounded per line.
+- **Incremental.** `fact_sales` merges on `sale_id` the lines whose line,
+  order or rate was loaded after the newest `source_loaded_at` already in it.
+  `fact_sales_rejected` is rebuilt every run.
+
+### Alternatives Considered
+
+- **`dim_supplier`, `dim_category`:** reached only through the product (ADR-013).
+- **Hashed keys:** deterministic too, but solve a multi-source problem this project lacks.
+- **Watermark on `order_items` only:** misses a status change and a late rate.
+- **Watermark on dbt's run time:** compares two different clocks.
+- **`fact_sales` as a table:** fast enough at this volume; incremental proves the pattern.
+
+### Consequences
+
+- A merge never deletes. A line that must leave `fact_sales` needs
+  `--full-refresh`; no such path exists today.
+- A new column or a changed filter needs `--full-refresh`, because
+  `on_schema_change` is `ignore`.
+- Summed `total_gbp` can differ by pennies from a converted total. DVT
+  reconciles sums in the original currency.
+- Order statuses are listed in `table_config.py` and `_marts.yml`; drift fails
+  `accepted_values`.
+- DVT candidate: sales in a store after its `closed_date`. The generator never
+  filters closed stores; the current data ends before Paris closes.
