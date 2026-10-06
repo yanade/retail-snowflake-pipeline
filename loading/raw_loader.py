@@ -19,7 +19,7 @@ MAX_FILES_PER_COPY = 1000  # Snowflake's limit for FILES = (...)
 
 METADATA_COLUMNS = ("_source_file", "_loaded_at")  # filled by COPY, not by the source
 
-RAW_COLUMNS = {  # source columns per raw table, in DDL order; a test keeps it equal to SOURCE_SCHEMAS
+RAW_COLUMNS = {  # columns per raw table, in DDL order; a test keeps it equal to SOURCE_SCHEMAS plus dead_letter
     "currencies": (
         "currency_code", "currency_name", "currency_symbol", "decimal_places", "is_active",
         "created_at", "updated_at"
@@ -69,6 +69,10 @@ RAW_COLUMNS = {  # source columns per raw table, in DDL order; a test keeps it e
     "payments": (
         "payment_id", "order_id", "payment_reference", "payment_method", "payment_status",
         "payment_amount", "currency_code", "payment_date", "created_at", "updated_at"
+    ),
+    "dead_letter": (
+        "record_id", "source_table", "source_key", "error_reason",
+        "raw_payload", "failed_at", "reprocessed", "reprocessed_at"
     ),
 }
 RAW_TABLES = frozenset(RAW_COLUMNS)

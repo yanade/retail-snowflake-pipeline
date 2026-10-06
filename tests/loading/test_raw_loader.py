@@ -22,6 +22,7 @@ from loading.raw_loader import (
     parse_copy_result,
     reconcile,
 )
+from transformation.dead_letter import DEAD_LETTER_COLUMNS, DEAD_LETTER_TABLE
 from transformation.schemas.source_schemas import SOURCE_SCHEMAS
 
 # Real COPY result rows from 2026-10-03, file paths shortened
@@ -69,7 +70,7 @@ def _export(files: tuple[str, ...] = CUSTOMERS_FILES, row_count: int = 1420) -> 
 
 
 def _deployed() -> dict[str, set[str]]:
-    """All 12 tables as create_raw_tables.sql deploys them: upper-case names plus metadata."""
+    """Every raw table as create_raw_tables.sql deploys it: upper-case names plus metadata."""
     return {
         table.upper(): {name.upper() for name in (*columns, "_source_file", "_loaded_at")}
         for table, columns in RAW_COLUMNS.items()
@@ -78,11 +79,12 @@ def _deployed() -> dict[str, set[str]]:
 
 # Column contract
 
-def test_raw_columns_match_source_schemas():
-    """The loader's column contract equals the source contract, table by table, in order."""
-    assert {table: list(columns) for table, columns in RAW_COLUMNS.items()} == {
-        table: schema.fieldNames() for table, schema in SOURCE_SCHEMAS.items()
-    }
+def test_raw_columns_match_source_schemas_and_dead_letter():
+    """The loader's column contract equals the source contract plus dead_letter, table by table, in order."""
+    expected = {table: schema.fieldNames() for table, schema in SOURCE_SCHEMAS.items()}
+    expected[DEAD_LETTER_TABLE] = list(DEAD_LETTER_COLUMNS)
+
+    assert {table: list(columns) for table, columns in RAW_COLUMNS.items()} == expected
 
 
 def test_raw_tables_are_the_contract_tables():
