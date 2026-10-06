@@ -21,7 +21,7 @@ problems to catch.
 
 **Business scenario:** a retailer with stores in the UK, Germany, France and
 Canada needs a reliable pipeline that loads new and changed orders, converts
-GBP, EUR and CAD order values to USD, detects data quality issues
+EUR and CAD order values to GBP, detects data quality issues
 automatically, and alerts the team on failures.
 
 ---
@@ -47,9 +47,9 @@ ADLS served     Parquet, one folder per table, plus a manifest of the files writ
                                                     ▼
 Snowflake raw   append-only change log, one typed table per source table
                                                     │
-                        dbt                 planned │  dedupe, FX cross rates, star schema
+                        dbt                         │  dedupe, FX to GBP, star schema
                                                     ▼
-Snowflake marts fact_sales, dim_customer, dim_product, dim_date
+Snowflake marts fact_sales, fact_sales_rejected, dim_customer, dim_product, dim_store, dim_date
                                                     │
                         DVT, Airflow        planned ▼
 pipeline_audit, Slack alerts, Streamlit dashboard
@@ -110,12 +110,12 @@ Two things are deliberately **not** rejections: a NULL `customer_id` is a guest
 checkout and maps to an unknown customer, and a negative quantity is a return,
 flagged `is_return`.
 
-**FX conversion** (planned, in dbt)
+**FX conversion** (in dbt)
 Rates are fetched from [freecurrencyapi.com](https://freecurrencyapi.com) with
 GBP as the base, so each rate means "units per one GBP". Orders are in GBP, EUR
-or CAD, so dbt converts through a cross rate:
-`rate(GBP to USD) / rate(GBP to order currency)`. Orders without a rate for
-their date go to a rejected table, not into the fact with a NULL amount.
+or CAD, and dbt converts each to GBP with `1 / rate(GBP to order currency)`; a
+GBP order's rate is 1. Orders without a rate for their date go to
+`fact_sales_rejected`, not into the fact with a NULL amount.
 
 **Databricks vs dbt**
 
@@ -182,9 +182,9 @@ Planned: dbt/, validation/, orchestration/, dashboard/
 - [x] Dead-letter capture
 - [x] Snowflake: warehouse, role, storage integration and stage
 - [x] GitHub Actions CI
-- [ ] Served zone export (Change Data Feed, manifest)
-- [ ] Snowflake raw tables and COPY INTO
-- [ ] dbt: staging, intermediate and mart models, tests
+- [x] Served zone export (Change Data Feed, manifest)
+- [x] Snowflake raw tables and COPY INTO
+- [x] dbt: staging, intermediate and mart models, tests
 - [ ] DVT validation suite
 - [ ] Airflow: main and reprocess DAGs
 - [ ] Streamlit data quality dashboard
