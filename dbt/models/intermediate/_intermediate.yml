@@ -1,0 +1,37 @@
+version: 2
+
+models:
+  - name: int_order_lines
+    description: "One row per order line with its order's attributes. Orphan lines kept with has_order = false."
+    columns:
+      - name: order_item_id
+        data_tests: [unique, not_null]
+  - name: int_fx_rates_gbp
+    description: "GBP per one unit of each currency, per day, via base cross rates. One row per rate_date and currency_code."
+    columns:
+      - name: rate_date
+        data_tests: [not_null]
+      - name: currency_code
+        data_tests: [not_null]
+      - name: fx_rate_to_gbp
+        data_tests: [not_null]
+
+unit_tests:
+  - name: int_fx_rates_gbp_cross_rates
+    model: int_fx_rates_gbp
+    given:
+      - input: ref('stg_exchange_rates')
+        rows:
+          - {rate_date: "2026-09-01", base_currency_code: GBP, target_currency_code: USD, exchange_rate: 1.25}
+          - {rate_date: "2026-09-01", base_currency_code: GBP, target_currency_code: EUR, exchange_rate: 1.20}
+          - {rate_date: "2026-09-01", base_currency_code: GBP, target_currency_code: CAD, exchange_rate: 1.70}
+          # only EUR on this day: GBP still gets its rate of 1, CAD gets nothing
+          - {rate_date: "2026-09-02", base_currency_code: GBP, target_currency_code: EUR, exchange_rate: 1.19}
+    expect:
+      rows:
+        - {rate_date: "2026-09-01", currency_code: GBP, fx_rate_to_gbp: 1}              # 1 / 1
+        - {rate_date: "2026-09-01", currency_code: USD, fx_rate_to_gbp: 0.8}            # 1 / 1.25
+        - {rate_date: "2026-09-01", currency_code: EUR, fx_rate_to_gbp: 0.8333333333}   # 1 / 1.20
+        - {rate_date: "2026-09-01", currency_code: CAD, fx_rate_to_gbp: 0.5882352941}   # 1 / 1.70
+        - {rate_date: "2026-09-02", currency_code: GBP, fx_rate_to_gbp: 1}
+        - {rate_date: "2026-09-02", currency_code: EUR, fx_rate_to_gbp: 0.8403361345}   # 1 / 1.19, rounded up

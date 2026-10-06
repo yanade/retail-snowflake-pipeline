@@ -20,3 +20,7 @@ models:
     marts:
       +materialized: table         # one consistent snapshot per run for DVT and the dashboard
       +schema: marts
+
+vars:
+  fx_base_currency: GBP            # every exchange_rates row is GBP-based
+  fx_reporting_currency: GBP       # currency of total_gbp in fact_sales
