@@ -40,6 +40,46 @@ models:
     columns:
       - name: sale_id
         data_tests: [unique, not_null]
+      - name: customer_key
+        data_tests:
+          - not_null                 # relationships skips nulls
+          - relationships:
+              arguments:
+                to: ref('dim_customer')
+                field: customer_key
+      - name: product_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_product')
+                field: product_key
+      - name: store_key
+        data_tests:
+          - not_null                 # no unknown store: every sale has a channel
+          - relationships:
+              arguments:
+                to: ref('dim_store')
+                field: store_key
+      - name: date_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+      - name: order_status
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [PENDING, PAID, SHIPPED, COMPLETED, CANCELLED, RETURNED]   # mirrors table_config.py
+      - name: fx_rate_to_gbp
+        data_tests: [not_null]
+      - name: total_original
+        data_tests: [not_null]
+      - name: total_gbp
+        data_tests: [not_null]       # a null measure would understate every sum (ADR-012)
 
   - name: fact_sales_rejected
     description: "Order lines that cannot enter fact_sales, with error_reason (ADR-012)."
@@ -47,4 +87,8 @@ models:
       - name: order_item_id
         data_tests: [unique, not_null]
       - name: error_reason
-        data_tests: [not_null]
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [missing_order, missing_fx_rate]
