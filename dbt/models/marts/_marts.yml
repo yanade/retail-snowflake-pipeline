@@ -1,0 +1,10 @@
+version: 2
+
+models:
+  - name: dim_date
+    description: "One row per calendar day between the dim_date_start and dim_date_end vars."
+    columns:
+      - name: date_key
+        data_tests: [unique, not_null]
+      - name: full_date
+        data_tests: [unique, not_null]

@@ -24,3 +24,5 @@ models:
 vars:
   fx_base_currency: GBP            # every exchange_rates row is GBP-based
   fx_reporting_currency: GBP       # currency of total_gbp in fact_sales
+  dim_date_start: "2025-01-01"     # first order day in generate_data.py
+  dim_date_end: "2027-12-31"       # widen when relationships to dim_date fails
