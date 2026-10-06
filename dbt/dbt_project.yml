@@ -14,3 +14,9 @@ models:
     staging:
       +materialized: view          # recomputed from all of raw on every read
       +schema: staging             # lands in <profile schema>_staging
+    intermediate:
+      +materialized: view          # queryable while debugging, unlike ephemeral
+      +schema: intermediate
+    marts:
+      +materialized: table         # one consistent snapshot per run for DVT and the dashboard
+      +schema: marts
