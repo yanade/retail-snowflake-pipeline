@@ -8,3 +8,14 @@ models:
         data_tests: [unique, not_null]
       - name: full_date
         data_tests: [unique, not_null]
+  - name: dim_product
+    description: "One row per product, with category and supplier flattened in (ADR-013). Type 1."
+    columns:
+      - name: product_key
+        data_tests: [unique, not_null]
+      - name: product_id
+        data_tests: [unique]
+      - name: category_name
+        data_tests: [not_null]   # left join must not hide an unresolved category
+      - name: supplier_name
+        data_tests: [not_null]
