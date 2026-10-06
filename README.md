@@ -1,8 +1,8 @@
 # Retail Sales Analytics Pipeline
 
-> 🚧 **Status: In Progress.** Source, ingestion and the raw-to-curated
-> transformation run end to end. The served zone, dbt, DVT, Airflow and the
-> dashboard are designed but not built yet.
+> 🚧 **Status: In Progress.** Source, ingestion, the curated and served zones,
+> the Snowflake load and the dbt star schema run end to end. DVT, Airflow and
+> the dashboard are designed but not built yet.
 
 A production-style data engineering pipeline from a live PostgreSQL OLTP
 database to a star schema in Snowflake, with incremental loading, data quality
@@ -39,11 +39,11 @@ ADLS raw        JSON, year=/month=/day= by extraction date
                                                     ▼  MERGE on primary key
 ADLS curated    Delta, one table per source table ──────▶ dead-letter (Delta)
                                                     │
-                        Databricks          planned │  Change Data Feed by Delta version
+                        Databricks                  │  Change Data Feed by Delta version
                                                     ▼
 ADLS served     Parquet, one folder per table, plus a manifest of the files written
                                                     │
-                        COPY INTO           planned │  files named in the manifest only
+                        COPY INTO                   │  files named in the manifest only
                                                     ▼
 Snowflake raw   append-only change log, one typed table per source table
                                                     │
@@ -91,7 +91,7 @@ when it is newer, so re-running a load changes nothing. From curated onward,
 increments are selected by Delta version through Change Data Feed, not by
 `updated_at`.
 
-**Raw in Snowflake is a change log, not a mirror** (planned)
+**Raw in Snowflake is a change log, not a mirror**
 `COPY INTO` only appends, and each increment carries every row that changed.
 A key therefore appears once per version in `raw`, and counting rows there
 overstates everything. dbt's staging models deduplicate to the current
@@ -104,7 +104,8 @@ its type, a NULL key or required column, a zero quantity, or an unknown
 `order_status` or `payment_status`. Each rejected row keeps every reason it
 failed and its original payload, in a Delta table registered as
 `retail_dev.ops.dead_letter`. A bad row seen again on a later run is not
-recorded twice.
+recorded twice. In dbt, an order line whose order was rejected or that has no
+FX rate for its date goes to `fact_sales_rejected` with its reason (ADR-024).
 
 Two things are deliberately **not** rejections: a NULL `customer_id` is a guest
 checkout and maps to an unknown customer, and a negative quantity is a return,
@@ -143,13 +144,16 @@ will read it live.
                     dim_date
                        │
 dim_customer ──── fact_sales ──── dim_product
+                       │
+                   dim_store
 ```
 
 `fact_sales` has one row per order line. Order-level amounts are not carried as
 measures, because they repeat on every line of an order. `order_status` is
 carried, and every revenue figure must filter on it: cancelled orders are
-roughly a tenth of line revenue in the generated data. Operational tables:
-`pipeline_audit` and `dead_letter`.
+roughly a tenth of line revenue in the generated data. Amounts are kept in the
+order's own currency and converted to GBP. Lines that cannot load go to
+`fact_sales_rejected`. Operational tables: `pipeline_audit` and `dead_letter`.
 
 ---
 
@@ -160,6 +164,8 @@ retail-snowflake-pipeline/
 ├── database/           # PostgreSQL OLTP source: schema, seed, data generators
 ├── ingestion/          # ADF pipeline exports, watermark tables, FX rates script
 ├── transformation/     # PySpark modules and Databricks notebooks
+├── loading/            # COPY INTO Snowflake raw from the served manifest
+├── dbt/                # staging, intermediate and mart models, tests
 ├── snowflake/          # Snowflake DDL: warehouse, role, storage integration, stage
 ├── terraform/          # Azure infrastructure as code
 ├── scripts/            # bootstrap, load, deploy and simulation scripts
@@ -167,7 +173,7 @@ retail-snowflake-pipeline/
 ├── docs/               # architecture decisions and runbooks
 └── .github/workflows/  # CI: pytest, terraform fmt and validate
 
-Planned: dbt/, validation/, orchestration/, dashboard/
+Planned: validation/, orchestration/, dashboard/
 ```
 
 ---
