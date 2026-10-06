@@ -19,3 +19,10 @@ models:
         data_tests: [not_null]   # left join must not hide an unresolved category
       - name: supplier_name
         data_tests: [not_null]
+  - name: dim_store
+    description: "One row per store or sales channel. The web store is a store, so every sale has one. Type 1."
+    columns:
+      - name: store_key
+        data_tests: [unique, not_null]
+      - name: store_code
+        data_tests: [unique, not_null]
