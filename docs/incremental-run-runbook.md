@@ -1,9 +1,10 @@
 # Incremental Run Runbook
 
 How to simulate a day of source activity and watch the incremental pipeline
-handle it, from Postgres to dbt staging. This exercises the watermark, the
+handle it, from Postgres to the dbt marts. This exercises the watermark, the
 lookback window, `dedupe()`, the MERGE guard, dead-letter deduplication, the
-CDF export, the manifest-driven COPY and staging's change-log dedupe on real data.
+CDF export, the manifest-driven COPY, staging's change-log dedupe and the
+incremental `fact_sales` merge on real data.
 
 `rebuild-runbook.md` covers the cold start. This one assumes everything is
 already deployed and loaded at least once, including one `full_reload` export.
@@ -198,7 +199,7 @@ every table.
 - an export older than 7 days is never loaded: load within the window
   (ADR-020).
 
-## 7. Build dbt staging
+## 7. Build dbt staging and marts
 
 ```bash
 set -a; source .env; set +a
@@ -209,13 +210,25 @@ cd dbt && ../venv-dbt/bin/dbt build
 ```
 
 dbt reads `.env` only through the shell, so export it in the same terminal.
-`dbt build` runs the source tests, then for each staging model its unit test,
-the view itself in `DBT_DEV_STAGING`, and its grain tests. Raw is the change
-log; staging dedupes it on `(pk, updated_at)` and derives SCD2 intervals with
-`lead()` (ADR-020 History).
+`dbt build` runs every layer in dependency order, each model followed by its
+tests: staging views in `DBT_DEV_STAGING`, intermediate views in
+`DBT_DEV_INTERMEDIATE`, and the marts as tables in `DBT_DEV_MARTS`. Raw is the
+change log; staging dedupes it on `(pk, updated_at)` (ADR-020 History).
+`fact_sales` is incremental: it merges only the lines whose line, order or
+rate was loaded after its newest `source_loaded_at` (ADR-024).
 
-Expected: `PASS=77` (24 source tests, 1 unit test, 16 views, 36 grain tests).
-The count is fixed; the row counts behind it change with every run.
+Expected: `PASS=137`. The count is fixed; the row counts behind it change
+with every run.
+
+**Check the increment:**
+
+```sql
+select count(*), max(loaded_at), max(source_loaded_at)
+from ecommerce_db.dbt_dev_marts.fact_sales;
+```
+
+Rows with this run's `loaded_at` must be the new lines plus every line of a
+changed order. With no source changes, `loaded_at` does not move.
 
 **If it fails:**
 
@@ -225,6 +238,12 @@ The count is fixed; the row counts behind it change with every run.
   The loader is at fault, not dbt.
 - a grain test (`unique`, `unique_version`, `one_current_version`): its SQL in
   `target/compiled/` returns the offending keys; run it in Snowsight.
+- `relationships` on `fact_sales.date_key`: an order outside `dim_date`. Widen
+  `dim_date_end` in `dbt_project.yml`.
+- `assert_every_order_line_lands_once`: a join lost or doubled a line between
+  `int_order_lines` and the two marts.
+- `invalid identifier` on a `fact_sales` column after a model change: the
+  existing table predates it. Run `dbt build --select fact_sales --full-refresh`.
 - `syntax error ... unexpected 'select'` after editing the macro: unbalanced
   brackets. `dbt/logs/dbt.log` holds the exact SQL sent.
 
@@ -238,6 +257,22 @@ The SQL watermark database pauses itself after 60 minutes idle, and serverless
 compute stops when the run ends.
 
 ---
+
+## Marts build, 2026-10-06
+
+First build of the intermediate and mart layers, over the raw data of the
+2026-10-02 run. No source change between the full refresh and the incremental
+build, so `fact_sales` merged nothing and `loaded_at` stayed put.
+
+| stage | value |
+|---|---|
+| `dbt build` | `PASS=137` |
+| orders | 2025-01-01 to 2025-02-03 |
+| int_order_lines | 4102 lines, 0 orphans |
+| fact_sales | 4102 rows |
+| fact_sales_rejected | 0 rows, every line has an order and a rate |
+| dim_date | 1095 days, 2025-01-01 to 2027-12-31 |
+| dim_product, dim_store | 10, 5 |
 
 ## Reference run, 2026-10-02
 
