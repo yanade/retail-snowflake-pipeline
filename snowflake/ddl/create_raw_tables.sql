@@ -186,3 +186,16 @@ CREATE TABLE IF NOT EXISTS ecommerce_db.raw.payments (
     _source_file       VARCHAR,        -- served file the row came from
     _loaded_at         TIMESTAMP_NTZ   -- when COPY loaded it, UTC
 ) COMMENT = 'Change log of served/payments, one row per exported version (ADR-020)';
+
+CREATE TABLE IF NOT EXISTS ecommerce_db.raw.dead_letter (
+    record_id        NUMBER(38,0),
+    source_table     VARCHAR,
+    source_key       VARCHAR,
+    error_reason     VARCHAR,
+    raw_payload      VARCHAR,        -- JSON text as captured before casting (ADR-016); PARSE_JSON in models
+    failed_at        TIMESTAMP_NTZ,
+    reprocessed      BOOLEAN,
+    reprocessed_at   TIMESTAMP_NTZ,
+    _source_file     VARCHAR,        -- served file the row came from
+    _loaded_at       TIMESTAMP_NTZ   -- when COPY loaded it, UTC
+) COMMENT = 'Change log of served/dead_letter, one row per exported version (ADR-012, ADR-020)';
