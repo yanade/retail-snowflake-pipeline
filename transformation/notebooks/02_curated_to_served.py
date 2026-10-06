@@ -2,9 +2,9 @@
 # MAGIC %md
 # MAGIC # Curated to served
 # MAGIC
-# MAGIC Exports what changed in each curated table since its last export as
-# MAGIC Parquet into the served zone, and records each export in the manifest.
-# MAGIC All logic lives in `transformation/served_pipeline.py`. See ADR-020.
+# MAGIC Exports what changed in each curated table, and in dead_letter, since its
+# MAGIC last export as Parquet into the served zone, and records each export in the
+# MAGIC manifest. All logic lives in `transformation/served_pipeline.py`. See ADR-020.l logic lives in `transformation/served_pipeline.py`. See ADR-020.
 
 # COMMAND ----------
 
@@ -19,6 +19,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from transformation.config.table_config import TABLE_CONFIGS
+from transformation.dead_letter import DEAD_LETTER_TABLE
 from transformation.served_pipeline import export_table, parse_flag
 from transformation.spark_session import apply_required_configs
 
@@ -39,7 +40,7 @@ run_date = date.fromisoformat(dbutils.widgets.get("run_date"))  # YYYY-MM-DD, fa
 full_reload = parse_flag("full_reload", dbutils.widgets.get("full_reload"))
 
 requested = [t.strip() for t in dbutils.widgets.get("tables").split(",") if t.strip()]
-tables = requested or sorted(TABLE_CONFIGS)
+tables = requested or [*sorted(TABLE_CONFIGS), DEAD_LETTER_TABLE]  # dead_letter last: 01 writes it, 02 exports it
 
 print(
     f"run_id={run_id}, run_date={run_date}, full_reload={full_reload}, "
