@@ -35,3 +35,16 @@ models:
         data_tests: [unique]     # null only on the unknown member
       - name: is_contactable
         data_tests: [not_null]
+  - name: fact_sales
+    description: "One row per order line (ADR-011). total_original is gross: quantity * unit_price, before discount, ex VAT. Filter revenue on order_status."
+    columns:
+      - name: sale_id
+        data_tests: [unique, not_null]
+
+  - name: fact_sales_rejected
+    description: "Order lines that cannot enter fact_sales, with error_reason (ADR-012)."
+    columns:
+      - name: order_item_id
+        data_tests: [unique, not_null]
+      - name: error_reason
+        data_tests: [not_null]
