@@ -10,6 +10,7 @@ rates as (
 select
     l.*,
     r.fx_rate_to_gbp,
+    r.rate_loaded_at,
     case
         when not l.has_order then 'missing_order'               -- order rejected upstream
         when r.fx_rate_to_gbp is null then 'missing_fx_rate'    -- never a null measure (ADR-012)

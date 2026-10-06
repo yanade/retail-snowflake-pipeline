@@ -92,3 +92,24 @@ models:
           - accepted_values:
               arguments:
                 values: [missing_order, missing_fx_rate]
+
+unit_tests:
+  - name: fact_sales_incremental_picks_changed_inputs
+    model: fact_sales
+    overrides:
+      macros:
+        is_incremental: true                   # run the incremental branch against a fake existing table
+    given:
+      - input: ref('int_order_lines_routed')
+        rows:
+          - {order_item_id: 1, error_reason: null, line_loaded_at: "2025-02-01 10:00:00", order_loaded_at: "2025-02-01 10:00:00", rate_loaded_at: "2025-02-01 10:00:00"}   # unchanged
+          - {order_item_id: 2, error_reason: null, line_loaded_at: "2025-02-01 10:00:00", order_loaded_at: "2025-02-05 10:00:00", rate_loaded_at: "2025-02-01 10:00:00"}   # status changed, line did not
+          - {order_item_id: 3, error_reason: null, line_loaded_at: "2025-02-01 10:00:00", order_loaded_at: "2025-02-01 10:00:00", rate_loaded_at: "2025-02-05 10:00:00"}   # late or corrected rate
+          - {order_item_id: 4, error_reason: missing_fx_rate, line_loaded_at: "2025-02-05 10:00:00", order_loaded_at: "2025-02-05 10:00:00", rate_loaded_at: null}  # new, not loadable
+      - input: this
+        rows:
+          - {sale_id: 1, source_loaded_at: "2025-02-01 10:00:00"}
+    expect:
+      rows:
+        - {sale_id: 2}
+        - {sale_id: 3}
