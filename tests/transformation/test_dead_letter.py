@@ -8,6 +8,8 @@ from pathlib import Path
 
 from pyspark.sql import DataFrame, SparkSession
 
+from transformation import dead_letter
+from transformation.curated_writer import CHANGE_DATA_FEED_PROPERTY
 from transformation.dead_letter import (
     build_dead_letter_rows,
     dead_letter_path,
@@ -147,3 +149,20 @@ def test_malformed_lines_are_told_apart_by_their_text(spark: SparkSession) -> No
     ]), "order_items")
 
     assert rows.select("record_id").distinct().count() == 2
+
+
+def test_first_write_enables_change_data_feed(spark: SparkSession, tmp_path: Path) -> None:
+    """The served export reads dead-letter through CDF, like every curated table."""
+    rejected = _rejected(spark, [(1, ["zero_quantity"], '{"order_item_id":"1"}')])
+
+    path = write_dead_letter(spark, rejected, "order_items", str(tmp_path))
+
+    props = spark.sql(f"DESCRIBE DETAIL delta.`{path}`").first()["properties"]
+    assert props.get(CHANGE_DATA_FEED_PROPERTY) == "true"
+
+
+def test_declared_columns_match_the_written_shape(spark: SparkSession) -> None:
+    """The served export selects DEAD_LETTER_COLUMNS, so they must be what is written."""
+    rejected = _rejected(spark, [(1, ["zero_quantity"], '{"order_item_id":"1"}')])
+
+    assert build_dead_letter_rows(rejected, "order_items").columns == list(dead_letter.DEAD_LETTER_COLUMNS)

@@ -11,6 +11,7 @@ from pyspark.sql import Column, DataFrame, SparkSession
 from pyspark.sql import functions as F
 
 from transformation.config.table_config import get_table_config
+from transformation.curated_writer import CHANGE_DATA_FEED_PROPERTY
 from transformation.dq_rules import DQ_ERRORS_COLUMN
 from transformation.raw_payload import RAW_PAYLOAD_COLUMN
 from transformation.raw_reader import CORRUPT_RECORD_COLUMN
@@ -18,6 +19,11 @@ from transformation.raw_reader import CORRUPT_RECORD_COLUMN
 DEAD_LETTER_DIRECTORY = "_dead_letter"  # ADR-012: curated/_dead_letter/, underscore keeps it out of the table namespace
 KEY_SEPARATOR = "|"                     # between composite primary key parts
 REASON_SEPARATOR = ";"                  # between reason codes in one VARCHAR
+DEAD_LETTER_TABLE = "dead_letter"  # its name in served, the manifest and Snowflake raw
+DEAD_LETTER_COLUMNS = (
+    "record_id", "source_table", "source_key", "error_reason",
+    "raw_payload", "failed_at", "reprocessed", "reprocessed_at",
+)  # build_dead_letter_rows() output, in order
 
 
 def dead_letter_path(curated_root: str) -> str:
@@ -104,7 +110,11 @@ def write_dead_letter(
     path = dead_letter_path(curated_root)
 
     if not DeltaTable.isDeltaTable(spark, path):
-        rows.write.format("delta").save(path)  # first run, even if empty, so the table always exists
+        (
+            rows.write.format("delta")
+            .option(CHANGE_DATA_FEED_PROPERTY, "true")  # the served export reads CDF (ADR-020)
+            .save(path)
+        )  # first run, even if empty, so the table always exists
         return path
 
     (
@@ -116,4 +126,3 @@ def write_dead_letter(
     )
 
     return path
-
