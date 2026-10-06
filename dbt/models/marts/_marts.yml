@@ -26,3 +26,12 @@ models:
         data_tests: [unique, not_null]
       - name: store_code
         data_tests: [unique, not_null]
+  - name: dim_customer
+    description: "One row per customer plus unknown member -1 for guest checkouts (ADR-013). Type 1."
+    columns:
+      - name: customer_key
+        data_tests: [unique, not_null]
+      - name: customer_id
+        data_tests: [unique]     # null only on the unknown member
+      - name: is_contactable
+        data_tests: [not_null]
