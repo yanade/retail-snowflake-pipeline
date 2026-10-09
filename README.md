@@ -1,8 +1,8 @@
 # Retail Sales Analytics Pipeline
 
 > 🚧 **Status: In Progress.** Source, ingestion, the curated and served zones,
-> the Snowflake load and the dbt star schema run end to end. DVT, Airflow and
-> the dashboard are designed but not built yet.
+> the Snowflake load, the dbt star schema and DVT validation run end to end.
+> Airflow and the dashboard are designed but not built yet.
 
 A production-style data engineering pipeline from a live PostgreSQL OLTP
 database to a star schema in Snowflake, with incremental loading, data quality
@@ -37,7 +37,7 @@ ADLS raw        JSON, year=/month=/day= by extraction date
                                                     │
                         Databricks PySpark          │  cast, DQ rules, dedupe,
                                                     ▼  MERGE on primary key
-ADLS curated    Delta, one table per source table ──────▶ dead-letter (Delta)
+ADLS curated    Delta, one table per source table ──────▶ dead-letter (Delta, also loaded to Snowflake)
                                                     │
                         Databricks                  │  Change Data Feed by Delta version
                                                     ▼
@@ -51,7 +51,11 @@ Snowflake raw   append-only change log, one typed table per source table
                                                     ▼
 Snowflake marts fact_sales, fact_sales_rejected, dim_customer, dim_product, dim_store, dim_date
                                                     │
-                        DVT, Airflow        planned ▼
+                        DVT                         │  PostgreSQL vs staging + dead-letter, per load window
+                                                    ▼
+validation/results/<run_id>.json, exit 1 on any mismatch
+                                                    │
+                        Airflow             planned ▼
 pipeline_audit, Slack alerts, Streamlit dashboard
 ```
 
@@ -103,13 +107,22 @@ Rows are rejected for a malformed JSON line, a value that will not convert to
 its type, a NULL key or required column, a zero quantity, or an unknown
 `order_status` or `payment_status`. Each rejected row keeps every reason it
 failed and its original payload, in a Delta table registered as
-`retail_dev.ops.dead_letter`. A bad row seen again on a later run is not
-recorded twice. In dbt, an order line whose order was rejected or that has no
+`retail_dev.ops.dead_letter` and exported to Snowflake like a curated table
+(`raw.dead_letter`, `stg_dead_letter`). A bad row seen again on a later run is
+not recorded twice. In dbt, an order line whose order was rejected or that has no
 FX rate for its date goes to `fact_sales_rejected` with its reason (ADR-024).
 
 Two things are deliberately **not** rejections: a NULL `customer_id` is a guest
 checkout and maps to an unknown customer, and a negative quantity is a return,
 flagged `is_return`.
+
+**Validation**
+After each load DVT compares PostgreSQL, up to the ADF window end, with
+Snowflake staging. The 9 tables without reject rules must match row for row.
+For `order_items`, `payments` and `orders`, every key's newest version,
+accepted to staging or rejected to dead-letter, must match the source in
+count and in sums, held in integer cents and split by currency.
+`validation/run_validations.py` exits 1 on any mismatch. See ADR-025.
 
 **FX conversion** (in dbt)
 Rates are fetched from [freecurrencyapi.com](https://freecurrencyapi.com) with
@@ -170,10 +183,11 @@ retail-snowflake-pipeline/
 ├── terraform/          # Azure infrastructure as code
 ├── scripts/            # bootstrap, load, deploy and simulation scripts
 ├── tests/              # pytest suite
+├── validation/         # DVT suite: reconciliation queries and the runner
 ├── docs/               # architecture decisions and runbooks
 └── .github/workflows/  # CI: pytest, terraform fmt and validate
 
-Planned: validation/, orchestration/, dashboard/
+Planned: orchestration/, dashboard/
 ```
 
 ---
@@ -191,7 +205,7 @@ Planned: validation/, orchestration/, dashboard/
 - [x] Served zone export (Change Data Feed, manifest)
 - [x] Snowflake raw tables and COPY INTO
 - [x] dbt: staging, intermediate and mart models, tests
-- [ ] DVT validation suite
+- [x] DVT validation suite
 - [ ] Airflow: main and reprocess DAGs
 - [ ] Streamlit data quality dashboard
 
