@@ -1617,3 +1617,53 @@ stays correct when it loads incrementally.
   `accepted_values`.
 - DVT candidate: sales in a store after its `closed_date`. The generator never
   filters closed stores; the current data ends before Paris closes.
+
+---
+
+## ADR-025: Cross-System Validation with DVT
+
+### Status
+
+Accepted
+
+### Context
+
+dbt tests see only Snowflake. A file lost between PostgreSQL and Snowflake
+leaves every model consistent and every test green. Rows also leave on
+purpose: Databricks rejects some to dead-letter. The check must tell a
+rejected row from a lost one without repeating the reject rules.
+
+### Decision
+
+- **Scope.** DVT checks only across systems, PostgreSQL against Snowflake
+  staging. Grain, keys and routing stay dbt tests.
+- **Window.** Source rows with `created_at <= window_end`, the ADF watermark
+  passed in by the caller. Never a bound read from Snowflake: a lost load
+  would move it too.
+- **Tables without reject rules (9).** Row counts must be equal.
+- **Tables with reject rules (3).** Per key, the newest version the pipeline
+  saw, accepted in staging or rejected in `stg_dead_letter`, must equal the
+  source: count and sums, payments and orders per currency. A test ties this
+  split to `table_config.py`.
+- **Money in integer cents.** DVT compares decimal aggregates as float32; a
+  one cent difference passed.
+- **Runner.** `validation/run_validations.py` builds connections from the
+  environment in a temporary folder, calls the DVT CLI per check, reads every
+  JSON line and exits 1 on any status but success. DVT exits 0 on a mismatch.
+
+### Alternatives Considered
+
+- **Reject rules repeated in the source query:** agrees with a broken rule instead of catching it.
+- **Source against raw:** raw is a change log; counts differ by design (ADR-020).
+- **Bound from `max(updated_at)` in Snowflake:** moves with the data it should check.
+- **DVT YAML configs:** embed the SQL text and a fixed date.
+- **DVT Python API:** internal, unlike the CLI and its JSON output.
+
+### Consequences
+
+- `venv-dvt` runs Python 3.11: DVT 8.10 pins ibis 7.1, whose numpy and
+  pyarrow have no 3.13 wheels.
+- The PostgreSQL password is a process argument for a few seconds per run.
+- Snowflake object names must be upper case; ibis quotes lower case ones.
+- Results are files in `validation/results/`, for Airflow to write to
+  `pipeline_audit`.
