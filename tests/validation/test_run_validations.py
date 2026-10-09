@@ -23,10 +23,18 @@ from validation.run_validations import (
     run_dvt,
     missing_tables,
     failed_rows,
+    postgres_connection_args,
+    snowflake_connection_args,
+    add_connections
 )
 
 WINDOW_END = datetime(2026, 10, 3, 15, 25, 24, tzinfo=timezone.utc)
 RUN_ID = "run-1"
+SNOWFLAKE_ENV = {
+    "SNOWFLAKE_ACCOUNT": "ab12345", "SNOWFLAKE_USER": "loader", "SNOWFLAKE_ROLE": "RETAIL_DEV",
+    "SNOWFLAKE_WAREHOUSE": "COMPUTE_WH", "SNOWFLAKE_DATABASE": "ecommerce_db",
+    "SNOWFLAKE_PRIVATE_KEY_PATH": "/keys/rsa_key.p8",
+}
 
 
 def _row(table: str | None, status: str = "success") -> dict:
@@ -42,6 +50,11 @@ def _line(*rows: dict) -> str:
 def _fake_dvt(stdout: str, exit_code: int = 0) -> list[str]:
     """A command that prints stdout and exits like DVT would, run through a real subprocess."""
     return [sys.executable, "-c", f"import sys; sys.stdout.write({stdout!r}); sys.exit({exit_code})"]
+
+
+def _value(args: list[str], flag: str) -> str:
+    """The value that follows a flag in an argument list."""
+    return args[args.index(flag) + 1]
 
 
 # parse_window_end
@@ -208,3 +221,46 @@ def test_run_dvt_fails_when_dvt_exits_non_zero():
 def test_run_dvt_fails_when_dvt_prints_nothing():
     with pytest.raises(RuntimeError, match="no results"):
         run_dvt(_fake_dvt(""))
+
+
+# Connections
+
+def test_postgres_password_is_url_decoded():
+    """A ! is stored as %21 in a URL; DVT needs the real password."""
+    args = postgres_connection_args("postgresql://admin:S3cret%21x@db.example.com:5432/retail_source")
+
+    assert _value(args, "--password") == "S3cret!x"
+    assert _value(args, "--host") == "db.example.com"
+    assert _value(args, "--database") == "retail_source"
+
+
+def test_postgres_port_defaults_to_5432():
+    args = postgres_connection_args("postgresql://admin:pw@db.example.com/retail_source")
+
+    assert _value(args, "--port") == "5432"
+
+
+def test_postgres_url_without_password_fails_and_names_it():
+    with pytest.raises(ValueError, match="password"):
+        postgres_connection_args("postgresql://admin@db.example.com/retail_source")
+
+
+def test_snowflake_uses_the_key_and_the_staging_schema():
+    args = snowflake_connection_args(SNOWFLAKE_ENV)
+
+    assert _value(args, "--database") == "ecommerce_db/DBT_DEV_STAGING"
+    assert json.loads(_value(args, "--connect-args")) == {"private_key_file": "/keys/rsa_key.p8"}
+    assert _value(args, "--password") == ""
+
+
+def test_snowflake_missing_variable_is_named():
+    env = {k: v for k, v in SNOWFLAKE_ENV.items() if k != "SNOWFLAKE_ROLE"}
+
+    with pytest.raises(ValueError, match="SNOWFLAKE_ROLE"):
+        snowflake_connection_args(env)
+
+
+def test_add_connections_needs_database_url(tmp_path: Path):
+    """Fails before any subprocess, so nothing is half-created."""
+    with pytest.raises(ValueError, match="DATABASE_URL"):
+        add_connections(SNOWFLAKE_ENV, str(tmp_path))
