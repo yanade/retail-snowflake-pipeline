@@ -1686,3 +1686,10 @@ rejected row from a lost one without repeating the reject rules.
 - Snowflake object names must be upper case; ibis quotes lower case ones.
 - Results are files in `validation/results/`, for Airflow to write to
   `pipeline_audit`.
+- Sums on tables updated in place assume a quiet source between ADF and DVT:
+  PostgreSQL keeps no old versions, so a row updated after the window shows
+  as a mismatch. A frequently loaded live source would check counts per
+  increment on every run and sums nightly on settled rows, or reconcile
+  against the extracted files instead of the live table.
+- Counts are cumulative, not per increment: fine at this volume, a full scan
+  of every table on each run at scale.
