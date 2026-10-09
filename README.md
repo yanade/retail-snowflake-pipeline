@@ -181,13 +181,18 @@ retail-snowflake-pipeline/
 ├── transformation/     # PySpark modules and Databricks notebooks
 ├── loading/            # COPY INTO Snowflake raw from the served manifest
 ├── dbt/                # staging, intermediate and mart models, tests
-├── snowflake/          # Snowflake DDL: warehouse, role, storage integration, stage
+├── validation/         # DVT suite: reconciliation queries and the runner
+├── audit/              # pipeline_audit: outcome mappers, writer, recorder
+├── snowflake/          # Snowflake DDL: warehouse, role, storage integration, stage, audit table
 ├── terraform/          # Azure infrastructure as code
+├── utils/              # shared helpers: PostgreSQL URL, logging setup
 ├── scripts/            # bootstrap, load, deploy and simulation scripts
 ├── tests/              # pytest suite
-├── validation/         # DVT suite: reconciliation queries and the runner
 ├── docs/               # architecture decisions and runbooks
 └── .github/workflows/  # CI: pytest, terraform fmt and validate
+
+Planned: orchestration/, dashboard/
+
 
 Planned: orchestration/, dashboard/
 ```
