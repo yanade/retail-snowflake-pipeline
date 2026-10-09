@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS ecommerce_db.audit.pipeline_audit (
     run_id         VARCHAR       NOT NULL,  -- Airflow run_id, unique only within one DAG
     task_name      VARCHAR       NOT NULL,  -- Airflow task_id
     status         VARCHAR       NOT NULL,  -- SUCCESS / FAILED / SKIPPED
-    dvt_status     VARCHAR,                 -- PASS / FAIL / SKIPPED, NULL when no validation result
+    dvt_status     VARCHAR,                 -- MATCH / MISMATCH / SKIPPED, NULL when no validation result
     rows_ingested  NUMBER(38,0),            -- NULL means not measured, 0 means measured and none
     rows_failed    NUMBER(38,0),
     error_message  VARCHAR,                 -- short, never connection details
