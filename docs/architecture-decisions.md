@@ -1693,3 +1693,56 @@ rejected row from a lost one without repeating the reject rules.
   against the extracted files instead of the live table.
 - Counts are cumulative, not per increment: fine at this volume, a full scan
   of every table on each run at scale.
+
+
+---
+## ADR-026: Pipeline Audit Table
+
+### Status
+
+Accepted
+
+### Context
+
+Each task reports in its own shape: notebook exit JSON, `load_raw`'s export
+checks, DVT's results file and exit code. The dashboard needs one row per task
+per run, and a retry must not add rows or turn a crash into a data failure.
+
+### Decision
+
+- **Table.** `ecommerce_db.audit.pipeline_audit`, one row per task per DAG
+  run, key `(dag_name, run_id, task_name)`: Airflow's run_id is unique only
+  within one DAG.
+- **Two statuses.** `status` SUCCESS / FAILED / SKIPPED says whether the task
+  ran, in Airflow's words. `dvt_status` MATCH / MISMATCH / SKIPPED says whether
+  source and target agreed, NULL when there is no verdict. A mismatch is
+  FAILED + MISMATCH, a DVT crash FAILED + NULL.
+- **Counts.** NULL is not measured, 0 is measured and none. `load_raw` counts
+  rows in raw from this run's exports, the same on every retry. Per-table
+  counts and failed checks go to `details` VARIANT.
+- **Latest outcome, not history.** One MERGE per record; a retry updates the
+  row and `try_number` shows which attempt wrote it.
+- **Code.** `audit/records.py` holds the rules Snowflake cannot enforce (no
+  CHECK, PK not enforced), `outcomes.py` maps each task's output, `writer.py`
+  MERGEs with bound values, `recorder.py` runs a task, records it and
+  re-raises the task's own error.
+
+### Alternatives Considered
+
+- **One row per task per table:** three-part key, a fake table name for dbt.
+- **Append every attempt:** full retry history, not needed yet.
+- **`load_raw` rows from COPY:** a retry that skips every file reports 0.
+- **CLIs write their own row:** a crashed CLI cannot record its crash.
+- **dbt model over the table:** no consumer besides Streamlit.
+
+### Consequences
+
+- A missing row means unknown: a killed worker runs no Python, and callbacks
+  may not run for upstream_failed tasks. The DAG ends with an `all_done` task.
+- An earlier failed attempt shows only as `try_number` and in the Airflow log.
+- One writer per key at a time; parallel tasks write different keys.
+- The DAG deletes `validation/results/<run_id>.json` before DVT, or a crashed
+  retry reads the previous attempt's file.
+- The DAG passes its run_id to `02_curated_to_served`, or `load_raw` counts 0.
+- `ALL PRIVILEGES` on the audit schema is broader than needed; production
+  grants USAGE and CREATE TABLE.
