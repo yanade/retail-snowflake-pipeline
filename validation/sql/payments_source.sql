@@ -4,4 +4,4 @@ select
     currency_code,
     (payment_amount * 100)::bigint as payment_amount_cents
 from retail_oltp.payments
-where created_at <= '2026-10-03 15:25:24+00'
+where created_at <= {window_end}
