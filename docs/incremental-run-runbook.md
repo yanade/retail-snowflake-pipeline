@@ -3,8 +3,8 @@
 How to simulate a day of source activity and watch the incremental pipeline
 handle it, from Postgres to the dbt marts. This exercises the watermark, the
 lookback window, `dedupe()`, the MERGE guard, dead-letter deduplication, the
-CDF export, the manifest-driven COPY, staging's change-log dedupe and the
-incremental `fact_sales` merge on real data.
+CDF export, the manifest-driven COPY, staging's change-log dedupe, the
+incremental `fact_sales` merge and the DVT reconciliation on real data.
 
 `rebuild-runbook.md` covers the cold start. This one assumes everything is
 already deployed and loaded at least once, including one `full_reload` export.
@@ -34,6 +34,13 @@ Expect 45 to 60 minutes, most of it waiting on ADF and Databricks jobs.
 
   ```bash
   python3.13 -m venv venv-dbt && ./venv-dbt/bin/pip install -r dbt/requirements.txt
+  ```
+
+- `venv-dvt` built once on Python 3.11, because DVT 8.10 pins packages with no
+  3.13 wheels (ADR-025):
+
+  ```bash
+  ~/.pyenv/versions/3.11.9/bin/python -m venv venv-dvt && ./venv-dvt/bin/pip install -r validation/requirements.txt
   ```
 
 ## 1. Create new and changed rows
@@ -146,13 +153,15 @@ Run the job. Expected per table:
   inserts plus updates from step 4
 - unchanged tables: `cdf N -> N`, `row_count 0`, because the no-op MERGE
   still committed a version
+- `dead_letter`: `cdf`, `row_count` equal to the new rejects; `cdf N -> N`
+  with 0 rows when no new bad rows arrived
 - the manifest gains exactly one row per table
 
 ```sql
 SELECT table_name, export_mode, start_version, end_version, row_count, written_at
 FROM retail_dev.ops.served_manifest
 ORDER BY written_at DESC
-LIMIT 12;
+LIMIT 13;
 ```
 
 Served files hold source columns only, no `_change_type`. Updates carry
@@ -160,8 +169,9 @@ today's `updated_at`, so a preimage would show up as an old one.
 
 **Reconcile served against curated.** Run
 `transformation/notebooks/reconcile_served.py` with `curated_root` and
-`served_root` (`tables` empty for all 12). It replays every file the manifest
-lists, keeps the latest row per primary key, and compares the result with
+`served_root` (`tables` empty for the 12 source tables; `dead_letter` has no
+source key and is checked by the loader in step 6). It replays every file the
+manifest lists, keeps the latest row per primary key, and compares the result with
 curated in both directions. It fails if any table has a difference, so a clean
 finish means served rebuilds curated exactly.
 
@@ -217,7 +227,7 @@ change log; staging dedupes it on `(pk, updated_at)` (ADR-020 History).
 `fact_sales` is incremental: it merges only the lines whose line, order or
 rate was loaded after its newest `source_loaded_at` (ADR-024).
 
-Expected: `PASS=137`. The count is fixed; the row counts behind it change
+Expected: `PASS=143`. The count is fixed; the row counts behind it change
 with every run.
 
 **Check the increment:**
@@ -247,7 +257,51 @@ changed order. With no source changes, `loaded_at` does not move.
 - `syntax error ... unexpected 'select'` after editing the macro: unbalanced
   brackets. `dbt/logs/dbt.log` holds the exact SQL sent.
 
-## 8. Stop the source
+## 8. Validate with DVT
+
+Read the window end of the ADF run in step 2. The watermark database pauses
+after 60 idle minutes; the first connection then fails while it resumes, so
+retry after a minute.
+
+```sql
+SELECT pipeline_name, last_watermark FROM pipeline_watermark_control ORDER BY pipeline_name;
+```
+
+All 12 rows share one value. Pass it as the window end:
+
+```bash
+set -a; source .env; set +a
+```
+
+```bash
+./venv-dvt/bin/python -m validation.run_validations --window-end '<last_watermark>'; echo "exit code: $?"
+```
+
+It compares PostgreSQL up to that point with Snowflake staging (ADR-025):
+row counts for the 9 tables without reject rules, and for `order_items`,
+`payments` and `orders` the newest accepted or rejected version per key, with
+sums in integer cents, per currency where there is one. Every result row is
+saved to `validation/results/<run_id>.json`.
+
+Expected: `32 validations, 0 failed` and `exit code: 0`.
+
+Do not change the source between step 2 and this step. PostgreSQL keeps no
+old versions, so a row updated after the window shows as a sum mismatch.
+
+**If it fails:**
+
+- `exit code: 1` with `ERROR` lines: a mismatch. A count with `source` above
+  `target` lost rows between PostgreSQL and staging: check step 6's reconcile
+  and `stg_dead_letter`. Equal counts with different sums: a value changed in
+  transit, or the source changed after the window.
+- every check fails with `source 0` or `None`: the window end is too early or
+  not UTC.
+- `Could not create DVT connection pg_source`: Postgres stopped, or `.env` not
+  exported. `sf_dev`: a `SNOWFLAKE_*` variable or the key path is wrong.
+- `DVT returned no result for`: the traceback holds DVT's stderr.
+- `Unable to create map UDFs` and `Unknown cast types`: warnings, not errors.
+
+## 9. Stop the source
 
 ```bash
 az postgres flexible-server stop --name retail-pipeline-dev-pg --resource-group retail-pipeline-dev-rg
