@@ -186,6 +186,7 @@ pipeline_config
 | Snowflake — star schema | Done | `DBT_DEV_MARTS`: `fact_sales`, `fact_sales_rejected`, four dimensions (ADR-024) |
 | dbt — staging, intermediate, mart models | Done | `dbt build` PASS=143. `dbt docs` not generated yet |
 | DVT — validation suite | Done | `validation/run_validations.py`, 32 checks per load window, exit 1 on mismatch (ADR-025). Results go to `pipeline_audit` with Airflow |
+| Audit table: pipeline_audit | Done | `snowflake/ddl/create_audit_tables.sql`, `audit/`: outcome mappers, MERGE writer, `run_and_record`. Live-tested retry, one row per key (ADR-026). Airflow calls it |
 | Airflow — main + reprocess DAGs | Planned | |
 | Streamlit — data quality dashboard | Planned | |
 | GitHub Actions CI | Done | `tests.yml`: pytest on push and PR. `terraform.yml`: fmt + validate on PR. No dbt job yet |
