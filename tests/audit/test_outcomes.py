@@ -5,8 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from audit.outcomes import EXPECTED_DVT_CHECKS, dvt_outcome, load_dvt_results
-from audit.records import DVT_MATCH, DVT_MISMATCH, FAILED, SUCCESS
+from audit.outcomes import (
+    EXPECTED_DVT_CHECKS, MAX_ERROR_CHARS, curated_to_served_outcome, dvt_outcome, failure_outcome,
+    load_dvt_results, load_raw_outcome, raw_to_curated_outcome, skipped_outcome,
+)
+from audit.records import DVT_MATCH, DVT_MISMATCH, DVT_SKIPPED, FAILED, SKIPPED, SUCCESS
+from loading.raw_loader import ExportCheck
 
 
 def _rows(status: str = "success", run_id: str = "run-1") -> list[dict]:
@@ -58,3 +62,68 @@ def test_results_file_round_trips(tmp_path: Path):
     path.write_text(json.dumps(_rows()))
 
     assert load_dvt_results(path) == _rows()
+
+
+def test_raw_to_curated_sums_valid_and_rejected_and_still_succeeds():
+    metrics = {"orders": {"rows_read": 10, "rows_valid": 7, "rows_rejected": 2},
+               "payments": {"rows_read": 5, "rows_valid": 5, "rows_rejected": 0}}
+
+    outcome = raw_to_curated_outcome(metrics)
+
+    assert (outcome.status, outcome.rows_ingested, outcome.rows_failed) == (SUCCESS, 12, 2)  # rejects are not a failure
+    assert outcome.details == {"tables": metrics}
+
+
+def test_raw_to_curated_with_no_new_files_measures_zero():
+    outcome = raw_to_curated_outcome({"orders": {"rows_read": 0, "rows_valid": 0, "rows_rejected": 0}})
+
+    assert (outcome.rows_ingested, outcome.rows_failed) == (0, 0)
+
+
+def test_curated_to_served_counts_only_tables_that_exported():
+    summaries = {"orders": {"export_mode": "cdf", "start_version": 3, "end_version": 4,
+                            "row_count": 40, "file_count": 1},
+                 "stores": None}
+
+    outcome = curated_to_served_outcome(summaries)
+
+    assert (outcome.rows_ingested, outcome.rows_failed) == (40, None)  # exporting rejects nothing: not measured
+    assert outcome.details["tables"]["stores"] is None
+
+
+def test_curated_to_served_with_nothing_changed_is_zero_not_null():
+    assert curated_to_served_outcome({"orders": None, "stores": None}).rows_ingested == 0
+
+
+def test_load_raw_counts_only_this_runs_exports():
+    checks = [ExportCheck("orders", "run-1", 40, 40), ExportCheck("payments", "run-1", 12, 12),
+              ExportCheck("orders", "run-0", 30, 30)]  # an older export still inside the 7-day window
+
+    outcome = load_raw_outcome(checks, "run-1")
+
+    assert outcome.rows_ingested == 52
+    assert len(outcome.details["exports"]) == 3
+
+
+def test_load_raw_with_no_exports_this_run_is_zero():
+    assert load_raw_outcome([], "run-1").rows_ingested == 0
+
+
+def test_failure_keeps_type_and_first_line_only():
+    outcome = failure_outcome(RuntimeError("DVT exited 2, the check did not run:\nstderr with details"))
+
+    assert (outcome.status, outcome.dvt_status) == (FAILED, None)
+    assert outcome.error_message == "RuntimeError: DVT exited 2, the check did not run:"
+
+
+def test_failure_message_is_capped_and_survives_an_empty_message():
+    assert len(failure_outcome(ValueError("x" * 5000)).error_message) == MAX_ERROR_CHARS
+    assert failure_outcome(RuntimeError()).error_message == "RuntimeError: "
+
+
+@pytest.mark.parametrize(("validates", "dvt_status"), [(False, None), (True, DVT_SKIPPED)])
+def test_skipped_records_the_reason(validates, dvt_status):
+    outcome = skipped_outcome("upstream_failed", validates)
+
+    assert (outcome.status, outcome.dvt_status) == (SKIPPED, dvt_status)
+    assert outcome.details == {"skip_reason": "upstream_failed"}
