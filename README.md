@@ -144,10 +144,12 @@ GBP order's rate is 1. Orders without a rate for their date go to
 Databricks never joins tables or computes business values. Served keeps the
 source shape, so grain and business rules live in exactly one place: dbt.
 
-**Observability** (planned)
-Every run will write a row to `pipeline_audit` in Snowflake: run ID, rows
-ingested, rows failed, validation status, start and end time. A Streamlit app
-will read it live.
+**Observability**
+Every task's outcome goes to `audit.pipeline_audit` in Snowflake, one row per
+task per run: status, validation result (MATCH / MISMATCH), rows ingested and
+rejected, error, start and end time, per-table details. A retry updates its
+row instead of adding one (ADR-026). Airflow calls the writer; a Streamlit app
+will read the table live.
 
 ---
 
@@ -206,6 +208,7 @@ Planned: orchestration/, dashboard/
 - [x] Snowflake raw tables and COPY INTO
 - [x] dbt: staging, intermediate and mart models, tests
 - [x] DVT validation suite
+- [x] pipeline_audit table, writer and recorder (Airflow wires it in)
 - [ ] Airflow: main and reprocess DAGs
 - [ ] Streamlit data quality dashboard
 
