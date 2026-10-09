@@ -41,3 +41,4 @@ dbt/dbt_packages/
 dbt/.user.yml
 
 venv-dvt/
+validation/results/
