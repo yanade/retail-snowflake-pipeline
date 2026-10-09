@@ -97,6 +97,16 @@ models:
       - name: employee_id
         data_tests: [unique, not_null]
 
+  - name: stg_dead_letter
+    description: "Current state of each ingestion reject, one row per record_id."
+    columns:
+      - name: record_id
+        data_tests: [unique, not_null]
+      - name: source_table
+        data_tests: [not_null]
+      - name: error_reason
+        data_tests: [not_null]
+
 unit_tests:
   - name: stg_orders_history_dedupes_and_chains_versions
     model: stg_orders_history

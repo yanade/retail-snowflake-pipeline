@@ -89,3 +89,9 @@ sources:
             data_tests: [not_null]
           - name: updated_at
             data_tests: [not_null]
+
+      - name: dead_letter
+        description: "Ingestion rejects exported from curated/_dead_letter, one row per exported version of a record (ADR-012)."
+        columns:
+          - name: record_id
+            data_tests: [not_null]
