@@ -1,5 +1,8 @@
 """Run the DVT suite for one load window and fail loudly on any mismatch (ADR-020)."""
 import sys
+import json
+import subprocess
+
 from dataclasses import dataclass
 
 from datetime import datetime, timezone
@@ -11,7 +14,7 @@ SOURCE_CONN = "pg_source"
 TARGET_CONN = "sf_dev"
 SOURCE_SCHEMA = "retail_oltp"
 TARGET_SCHEMA = "DBT_DEV_STAGING"  # upper case, or ibis quotes the name and Snowflake cannot find it
-
+SUCCESS_STATUS = "success"  # anything else, including an unknown status, is a failure
 COUNT_TABLES = (  # no reject rules, so source and staging must have the same row count
     "currencies", "product_categories", "suppliers", "products", "customers",
     "customer_addresses", "stores", "employees", "exchange_rates",
@@ -134,3 +137,68 @@ def render_source_query(path: Path, window_end: datetime) -> str:
     if WINDOW_END_PLACEHOLDER not in text:
         raise ValueError(f"{path.name} has no {WINDOW_END_PLACEHOLDER}; an unbounded source query compares a moving table")
     return text.replace(WINDOW_END_PLACEHOLDER, sql_timestamp(window_end))
+
+
+
+def run_dvt(command: list[str]) -> list[dict]:
+    """
+    Run one DVT command and return every validation row it printed.
+
+    Args:
+        command: Argument list from count_command() or reconciliation_command().
+
+    Returns:
+        One dict per validation row.
+    """
+    completed = subprocess.run(command, capture_output=True, text=True)  # no shell: arguments arrive exactly as built
+    if completed.returncode != 0:
+        raise RuntimeError(f"DVT exited {completed.returncode}, the check did not run:\n{completed.stderr[-2000:]}")
+    rows = parse_dvt_output(completed.stdout)
+    if not rows:
+        raise RuntimeError(f"DVT printed no results:\n{completed.stderr[-2000:]}")
+    return rows
+
+
+def parse_dvt_output(stdout: str) -> list[dict]:
+    """
+    Parse DVT's -fmt json output: one JSON object per line, one line per table.
+
+    Args:
+        stdout: Everything DVT wrote to stdout.
+
+    Returns:
+        Every validation row from every line, in order.
+    """
+    rows = []
+    for line in stdout.splitlines():
+        if line.strip():
+            rows.extend(json.loads(line).values())  # a non-JSON line raises: never skip what we cannot read
+    return rows
+
+
+def missing_tables(rows: list[dict], expected: tuple[str, ...]) -> list[str]:
+    """
+    Tables that should have been validated but have no result row.
+
+    Args:
+        rows: Rows from run_dvt() for the count command.
+        expected: Source table names, without schema.
+
+    Returns:
+        The missing names, sorted; empty when every table reported.
+    """
+    reported = {row["source_table_name"] for row in rows}
+    return sorted(t for t in expected if f"{SOURCE_SCHEMA}.{t}" not in reported)
+
+
+def failed_rows(rows: list[dict]) -> list[dict]:
+    """
+    Rows whose status is not success.
+
+    Args:
+        rows: Rows from run_dvt().
+
+    Returns:
+        The failing rows, in order.
+    """
+    return [row for row in rows if row.get("validation_status") != SUCCESS_STATUS]

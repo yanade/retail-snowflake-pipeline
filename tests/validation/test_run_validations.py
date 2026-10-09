@@ -1,9 +1,11 @@
 """Unit tests for validation/run_validations.py: window parsing, source query rendering, the check list and DVT commands."""
 
+import pytest
+import json
+import sys
+
 from datetime import datetime, timezone
 from pathlib import Path
-
-import pytest
 
 from transformation.config.table_config import TABLE_CONFIGS
 from transformation.schemas.source_schemas import SOURCE_SCHEMAS
@@ -17,10 +19,29 @@ from validation.run_validations import (
     reconciliation_command,
     render_source_query,
     sql_timestamp,
+    parse_dvt_output,
+    run_dvt,
+    missing_tables,
+    failed_rows,
 )
 
 WINDOW_END = datetime(2026, 10, 3, 15, 25, 24, tzinfo=timezone.utc)
 RUN_ID = "run-1"
+
+
+def _row(table: str | None, status: str = "success") -> dict:
+    """One DVT result row, reduced to the fields the runner reads."""
+    return {"source_table_name": table, "validation_name": "count", "validation_status": status}
+
+
+def _line(*rows: dict) -> str:
+    """One stdout line as DVT -fmt json prints it: rows keyed "0", "1", ..."""
+    return json.dumps({str(i): row for i, row in enumerate(rows)})
+
+
+def _fake_dvt(stdout: str, exit_code: int = 0) -> list[str]:
+    """A command that prints stdout and exits like DVT would, run through a real subprocess."""
+    return [sys.executable, "-c", f"import sys; sys.stdout.write({stdout!r}); sys.exit({exit_code})"]
 
 
 # parse_window_end
@@ -132,3 +153,58 @@ def test_every_command_carries_the_run_id_and_asks_for_json():
     for command in commands:
         assert command[command.index("--run-id") + 1] == RUN_ID
         assert command[command.index("-fmt") + 1] == "json"
+
+
+
+# parse_dvt_output
+
+def test_every_line_is_parsed():
+    """A multi-table run prints one JSON object per table; reading only the last line hides the rest."""
+    stdout = "\n".join([_line(_row("retail_oltp.currencies")), _line(_row("retail_oltp.stores"))]) + "\n"
+
+    assert [row["source_table_name"] for row in parse_dvt_output(stdout)] == [
+        "retail_oltp.currencies", "retail_oltp.stores",
+    ]
+
+
+def test_every_row_of_a_line_is_parsed():
+    """A grouped reconciliation prints several rows in one object."""
+    assert len(parse_dvt_output(_line(_row(None), _row(None), _row(None)))) == 3
+
+
+def test_a_line_that_is_not_json_fails():
+    with pytest.raises(json.JSONDecodeError):
+        parse_dvt_output("Traceback (most recent call last):\n")
+
+
+# missing_tables and failed_rows
+
+def test_a_table_without_a_result_is_missing():
+    rows = [_row("retail_oltp.currencies")]
+
+    assert missing_tables(rows, ("currencies", "stores")) == ["stores"]
+
+
+def test_fail_and_unknown_statuses_are_failures():
+    rows = [_row("a"), _row("b", "fail"), _row("c", "error"), {"source_table_name": "d"}]
+
+    assert [row["source_table_name"] for row in failed_rows(rows)] == ["b", "c", "d"]
+
+
+# run_dvt
+
+def test_run_dvt_returns_the_printed_rows():
+    rows = run_dvt(_fake_dvt(_line(_row("retail_oltp.stores")) + "\n"))
+
+    assert rows == [_row("retail_oltp.stores")]
+
+
+def test_run_dvt_fails_when_dvt_exits_non_zero():
+    """DVT crashed: the check did not run, which is not the same as a mismatch."""
+    with pytest.raises(RuntimeError, match="exited 1"):
+        run_dvt(_fake_dvt("", exit_code=1))
+
+
+def test_run_dvt_fails_when_dvt_prints_nothing():
+    with pytest.raises(RuntimeError, match="no results"):
+        run_dvt(_fake_dvt(""))
