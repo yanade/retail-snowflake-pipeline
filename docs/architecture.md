@@ -73,9 +73,9 @@ Sources
                                     │
                                     ▼
                                    DVT
-                         Row counts · nulls
-                         sum reconciliation
-                         per increment
+                         PostgreSQL vs staging
+                         + dead-letter: counts,
+                         sums in cents, per window
                                     │
                               ┌─────┴─────┐
                               ▼           ▼
@@ -106,7 +106,7 @@ Terraform provisions all Azure infrastructure as code.
 | Databricks PySpark | Raw → curated: type casting, DQ rules, dedupe, MERGE on each table's primary key (ADR-010), dead-letter routing. Curated → served: Change Data Feed export by Delta version, recorded in a manifest (ADR-020). No joins, no business values. |
 | Snowflake | `raw` holds an append-only change log, loaded by COPY INTO from the files named in the manifest (ADR-019, ADR-020). |
 | dbt | Staging dedupes the change log to the current version. Intermediate and marts convert to GBP and build the star schema; `fact_sales` loads incrementally, unloadable lines go to `fact_sales_rejected` (ADR-012, ADR-024). dbt tests on every build. |
-| DVT | Post-load validation. Row counts, null checks, sum reconciliation per increment. Results written to audit table. |
+| DVT | Cross-system validation after each load: PostgreSQL up to the ADF window end against Snowflake staging plus dead-letter. Counts for 9 tables; counts and sums in integer cents for the 3 with reject rules. Exits 1 on any mismatch; results per run in `validation/results/` (ADR-025). |
 | Airflow | End-to-end orchestration. Invokes ADF, Databricks, dbt, DVT. Owns retry logic, audit logging, Slack alerts. |
 | Azure Key Vault | Secret management. ADF reads credentials at runtime via Managed Identity. |
 | Streamlit | Data quality dashboard. Reads `pipeline_audit` table live. Surfaces pass/fail trends and dead-letter volume. |
@@ -131,7 +131,8 @@ curated/
                                          source table, merged on primary key
 
 curated/_dead_letter/             ← rejected rows with reasons and raw payload,
-                                         registered as retail_dev.ops.dead_letter
+                                         registered as retail_dev.ops.dead_letter,
+                                         exported to served/dead_letter (ADR-012)
 
 served/
     <table_name>/
@@ -180,11 +181,11 @@ pipeline_config
 | Azure SQL — watermark tables | Done | `pipeline_watermark_control`, `pipeline_config` seeded per retail_oltp table |
 | freecurrencyapi.com — fetch script | Done | `ingestion/api_ingest/` with unit tests, `--write-postgres` upsert |
 | Databricks — PySpark transformation | Done | raw → curated MERGE per table (ADR-010), curated → served CDF export with manifest (ADR-020) |
-| Dead-letter handler | Done | Delta at `curated/_dead_letter/`, `retail_dev.ops.dead_letter` (ADR-012, ADR-016) |
+| Dead-letter handler | Done | Delta at `curated/_dead_letter/`, `retail_dev.ops.dead_letter` (ADR-012, ADR-016); exported to Snowflake `raw.dead_letter`, `stg_dead_letter` |
 | Snowflake — raw load | Done | COPY INTO from the manifest, row counts checked per export, schema drift check (ADR-019, ADR-020) |
 | Snowflake — star schema | Done | `DBT_DEV_MARTS`: `fact_sales`, `fact_sales_rejected`, four dimensions (ADR-024) |
-| dbt — staging, intermediate, mart models | Done | `dbt build` PASS=137. `dbt docs` not generated yet |
-| DVT — validation suite | Planned | |
+| dbt — staging, intermediate, mart models | Done | `dbt build` PASS=143. `dbt docs` not generated yet |
+| DVT — validation suite | Done | `validation/run_validations.py`, 32 checks per load window, exit 1 on mismatch (ADR-025). Results go to `pipeline_audit` with Airflow |
 | Airflow — main + reprocess DAGs | Planned | |
 | Streamlit — data quality dashboard | Planned | |
 | GitHub Actions CI | Done | `tests.yml`: pytest on push and PR. `terraform.yml`: fmt + validate on PR. No dbt job yet |
