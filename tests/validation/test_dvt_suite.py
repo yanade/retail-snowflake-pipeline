@@ -1,31 +1,31 @@
-"""Unit tests for validation/run_validations.py: window parsing, source query rendering, the check list and DVT commands."""
+"""Unit tests for validation/dvt_suite.py: window, check list, DVT commands, results and connections."""
 
-import pytest
 import json
 import sys
-
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 from transformation.config.table_config import TABLE_CONFIGS
 from transformation.schemas.source_schemas import SOURCE_SCHEMAS
-from validation.run_validations import (
+from validation.dvt_suite import (
     COUNT_TABLES,
     RECONCILIATIONS,
     SQL_DIR,
     WINDOW_END_PLACEHOLDER,
+    add_connections,
     count_command,
+    failed_rows,
+    missing_tables,
+    parse_dvt_output,
     parse_window_end,
+    postgres_connection_args,
     reconciliation_command,
     render_source_query,
-    sql_timestamp,
-    parse_dvt_output,
     run_dvt,
-    missing_tables,
-    failed_rows,
-    postgres_connection_args,
     snowflake_connection_args,
-    add_connections
+    sql_timestamp,
 )
 
 WINDOW_END = datetime(2026, 10, 3, 15, 25, 24, tzinfo=timezone.utc)

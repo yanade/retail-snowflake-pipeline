@@ -1,15 +1,12 @@
-"""Run the DVT suite for one load window and fail loudly on any mismatch (ADR-020)."""
-import sys
+"""Building blocks of the DVT suite: the load window, the 12 checks, DVT commands, results and connections (ADR-020)."""
+
 import json
 import subprocess
-import os
-import tempfile
-
+import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
-
 from datetime import datetime, timezone
 from pathlib import Path
-from collections.abc import Mapping
 from urllib.parse import unquote, urlsplit
 
 SQL_DIR = Path(__file__).resolve().parent / "sql"
