@@ -1,16 +1,20 @@
-"""Guard: create_raw_tables.sql declares the same columns as source_schemas.py."""
+"""Guard: create_raw_tables.sql declares the same columns as every served table."""
 
 import re
 from pathlib import Path
 
 import pytest
 
+from transformation.dead_letter import DEAD_LETTER_COLUMNS, DEAD_LETTER_TABLE
 from transformation.schemas.source_schemas import SOURCE_SCHEMAS
 
 DDL_PATH = Path(__file__).resolve().parents[2] / "snowflake" / "ddl" / "create_raw_tables.sql"
 TABLE_PATTERN = re.compile(r"CREATE TABLE IF NOT EXISTS ecommerce_db\.raw\.(\w+) \((.*?)\n\)", re.S)
 METADATA_PREFIX = "_"  # load metadata columns, not source columns
-
+EXPECTED_COLUMNS = {
+    **{table: schema.fieldNames() for table, schema in SOURCE_SCHEMAS.items()},
+    DEAD_LETTER_TABLE: list(DEAD_LETTER_COLUMNS),
+}  # every served table: the source tables plus dead_letter
 
 def _ddl_columns() -> dict[str, list[str]]:
     """
@@ -26,12 +30,12 @@ def _ddl_columns() -> dict[str, list[str]]:
     return tables
 
 
-def test_ddl_has_one_table_per_source_table():
-    """A table added to source_schemas.py must also be added to the DDL, and vice versa."""
-    assert set(_ddl_columns()) == set(SOURCE_SCHEMAS)
+def test_ddl_has_one_table_per_served_table():
+    """A table added to the served export must also be added to the DDL, and vice versa."""
+    assert set(_ddl_columns()) == set(EXPECTED_COLUMNS)
 
 
-@pytest.mark.parametrize("table", sorted(SOURCE_SCHEMAS))
-def test_ddl_columns_match_source_schema(table):
+@pytest.mark.parametrize("table", sorted(EXPECTED_COLUMNS))
+def test_ddl_columns_match_declared_columns(table):
     """Same names in the same order; order matters to a reader, MATCH_BY_COLUMN_NAME ignores it."""
-    assert _ddl_columns()[table] == SOURCE_SCHEMAS[table].fieldNames()
+    assert _ddl_columns()[table] == EXPECTED_COLUMNS[table]
