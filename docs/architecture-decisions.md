@@ -588,6 +588,9 @@ Dead-letter therefore has two homes, one per stage: the Delta table for
 ingestion rejects, a Snowflake table for modelling rejects. Both surface in the
 dashboard.
 
+Amended on 2026-10-09: dead-letter also reaches Snowflake, see the amendment
+at the end.
+
 ### Context
 
 `ingestion/api_ingest/fetch_fx_rates.py` fetches with `BASE_CURRENCY=GBP`,
@@ -657,6 +660,22 @@ Snowflake's `VARIANT` via `PARSE_JSON` when the table migrates.
   `int_order_lines_routed` unit test covers the path instead.
 - `fact_sales.fx_rate_to_gbp` and `total_gbp` are `not_null`-tested on every
   build (ADR-024).
+
+### Amendment, 2026-10-09: dead_letter reaches Snowflake through served
+
+- **Path.** `curated/_dead_letter` is exported, manifested and loaded like a
+  curated table: `export_source()` resolves its path and columns, Change Data
+  Feed is on, and the first export is a `full_reload` snapshot. It lands in
+  `raw.dead_letter`; `stg_dead_letter` keeps the newest version of each
+  `record_id`.
+- **Why.** DVT needs rejected keys next to staging (ADR-025), and the
+  dashboard reads Snowflake.
+- **Delta stays the writer.** Databricks writes rejects; Snowflake holds a
+  copy one export later. A `reprocessed` change arrives through CDF.
+- **`raw_payload`** stays VARCHAR in raw; queries that need fields use
+  `PARSE_JSON`.
+- **Supersedes:** "until the Snowflake warehouse exists" in the Decision, and
+  the Consequences bullet that the migration is a future task.
 
 ---
 
