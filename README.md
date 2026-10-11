@@ -192,9 +192,6 @@ retail-snowflake-pipeline/
 └── .github/workflows/  # CI: pytest, terraform fmt and validate
 
 Planned: orchestration/, dashboard/
-
-
-Planned: orchestration/, dashboard/
 ```
 
 ---
@@ -267,5 +264,4 @@ Until Airflow exists, one load is three manual steps, described in
 
 - `docs/architecture-decisions.md`: every design decision with its
   alternatives, including the served zone contract (ADR-020)
-- `database/README.md`: source schema and the data quality scenarios it
-  generates
+- `database/README.md`: source schema and the data quality scenarios it generates
