@@ -7,16 +7,15 @@
 #   .env with DATABASE_URL pointing at the Azure server
 #
 # Usage:
-#   ./scripts/simulate_source_changes.sh             # 2 days, 20 orders/day, 25 updates
-#   ./scripts/simulate_source_changes.sh 3 30 50     # days, orders per day, updates
+#   #   ./scripts/simulate_source_changes.sh             # every day up to today, 20 orders/day, 25 updates
+#   ./scripts/simulate_source_changes.sh 30 50       # orders per day, updates
 #   SEED=11 ./scripts/simulate_source_changes.sh     # a different random draw
 
 set -e  # exit immediately if any command fails
 
-DAYS="${1:-2}"
-ORDERS_PER_DAY="${2:-20}"
-UPDATE_COUNT="${3:-25}"
-SEED="${SEED:-7}"  # fixed by default, so a run is repeatable
+ORDERS_PER_DAY="${1:-20}"
+UPDATE_COUNT="${2:-25}"
+SEED="${SEED:-7}"  # fixed by default, so a run is repeatable, for random data SEED=$RANDOM
 
 # psql doesn't read .env automatically, same pattern as load_database.sh
 if [ -z "$DATABASE_URL" ] && [ -f .env ]; then
@@ -39,9 +38,9 @@ snapshot() {
 
 echo "Before: $(snapshot)"
 
-echo "Appending ${DAYS} day(s) at about ${ORDERS_PER_DAY} orders per day..."
+echo "Appending every day up to today at about ${ORDERS_PER_DAY} orders per day..."
 # cd database: the generator imports its helpers from the modules next to it
-(cd database && python generate_incremental_data.py --days "$DAYS" --orders-per-day "$ORDERS_PER_DAY" --seed "$SEED")
+(cd database && python generate_incremental_data.py --orders-per-day "$ORDERS_PER_DAY" --seed "$SEED")
 
 echo "Changing the status of ${UPDATE_COUNT} existing orders..."
 # The lowest ids, so the same rows can be checked in curated afterwards.
