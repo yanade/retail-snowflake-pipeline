@@ -28,6 +28,6 @@ echo "Loading master/reference data..."
 (cd database && python seed.py)
 
 echo "Generating transactional data..."
-(cd database && python generate_data.py --days 30 --orders-per-day 50 --seed 42)
+(cd database && python generate_data.py --days 90 --orders-per-day 50 --seed 42)
 
 echo "Done."
