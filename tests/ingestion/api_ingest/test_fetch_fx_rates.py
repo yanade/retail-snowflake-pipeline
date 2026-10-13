@@ -8,6 +8,7 @@ from pathlib import Path
 
 from ingestion.api_ingest.fetch_fx_rates import (
     DEFAULT_LOOKBACK_DAYS,
+    latest_available_date,
     load_config,
     fetch_fx_rates,
     parse_args,
@@ -257,15 +258,14 @@ def test_parse_args_valid_dates():
     assert args.write_postgres is False
 
 
-def test_parse_args_defaults_to_the_last_lookback_window():
-    """No dates means the last DEFAULT_LOOKBACK_DAYS days, ending today in UTC."""
+def test_parse_args_defaults_to_the_window_ending_yesterday():
+    """No dates means the last DEFAULT_LOOKBACK_DAYS days, ending yesterday in UTC."""
     with patch("sys.argv", ["fetch_fx_rates"]):
         args = parse_args()
 
-    today = datetime.now(timezone.utc).date()
-    assert args.end == today
-    assert args.start == today - timedelta(days=DEFAULT_LOOKBACK_DAYS - 1)  # inclusive range
-
+    yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
+    assert args.end == yesterday
+    assert args.start == yesterday - timedelta(days=DEFAULT_LOOKBACK_DAYS - 1)  # inclusive range
 
 def test_parse_args_accepts_a_single_day():
     """The same date for --start and --end is a one-day fetch."""
@@ -286,5 +286,18 @@ def test_parse_args_rejects_a_malformed_date(bad_date):
 def test_parse_args_rejects_start_after_end():
     """An empty range is a typo, so it fails before any config or API call."""
     with patch("sys.argv", ["fetch_fx_rates", "--start", "2025-02-06", "--end", "2025-02-03"]):
+        with pytest.raises(SystemExit):
+            parse_args()
+
+
+def test_latest_available_date_is_yesterday():
+    """End-of-day rates: on 2026-10-13 the newest served date is 2026-10-12."""
+    assert latest_available_date(datetime(2026, 10, 13, 0, 5, tzinfo=timezone.utc)) == date(2026, 10, 12)
+
+
+def test_parse_args_rejects_an_end_date_without_rates_yet():
+    """Today has no end-of-day rate, so asking for it fails before any API call."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    with patch("sys.argv", ["fetch_fx_rates", "--start", "2025-02-03", "--end", today]):
         with pytest.raises(SystemExit):
             parse_args()

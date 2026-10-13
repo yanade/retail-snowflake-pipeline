@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 logger = setup_logging()
 
 
-DEFAULT_LOOKBACK_DAYS = 30  # same window as generate_data.py's default --days 30
+DEFAULT_LOOKBACK_DAYS = 90  # same window as generate_data.py's default --days 90
 
 # The free tier is rate limited per minute: pace requests, retry with backoff on 429
 REQUEST_DELAY_SECONDS = 1.0
@@ -402,6 +402,20 @@ def upsert_rates_to_postgres(
     return len(rows)
 
 
+def latest_available_date(now: datetime) -> date:
+    """
+    Return the newest date the historical endpoint serves: yesterday in UTC.
+
+    Args:
+        now: Current time, UTC-aware.
+
+    Returns:
+        Yesterday's date.
+    """
+
+    return now.date() - timedelta(days=1)  # rates are end-of-day, so today's do not exist yet
+
+
 def parse_args() -> argparse.Namespace:
     """
     Parse the CLI arguments.
@@ -414,7 +428,8 @@ def parse_args() -> argparse.Namespace:
         description="Fetch historical FX rates and optionally load them into PostgreSQL."
     )
 
-    default_end = datetime.now(timezone.utc).date()
+    latest = latest_available_date(datetime.now(timezone.utc))
+    default_end = latest
     default_start = default_end - timedelta(days=DEFAULT_LOOKBACK_DAYS - 1)  # inclusive range: one less than the window
 
     parser.add_argument(
@@ -442,6 +457,8 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.start > args.end:
         parser.error(f"--start {args.start} must not be after --end {args.end}")  # a typo, so stop before config or API calls
+    if args.end > latest:
+        parser.error(f"--end {args.end} is after {latest}; the API serves end-of-day rates up to yesterday")
     return args
 
 
