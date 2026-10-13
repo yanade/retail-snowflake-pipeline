@@ -171,10 +171,12 @@ admin password. Nothing else in `.env` changes.
 ./scripts/load_database.sh
 ```
 
-Deterministic: `--seed 42`, and `generate_data.py` hardcodes
-`start_date = 2025-01-01`. The same data comes back every time.
+Generates 90 days ending today in UTC, `--seed 42` (ADR-027). The dates move
+with the clock; to repeat a run exactly, call `generate_data.py` with
+`--end-date`.
 
-Verify: `orders` should be non-zero and order dates should start 2025-01-01.
+Verify: about 4,500 orders, the first order 89 days before today, no
+`order_date` after `now()`.
 
 ### 6. FX rates
 
@@ -187,18 +189,19 @@ conversion in notebook 02 fails, and the failure surfaces far downstream.
 ```
 
 The script derives the range from `retail_oltp.orders`: earliest order date to
-latest order date plus three days. The rates therefore always cover the data
-that was just generated, including after `generate_incremental_data.py` appends
-new days. Pass an explicit range to override it:
+yesterday. The API serves end-of-day rates, so today's has not been published
+yet; today's orders wait for tomorrow's run (ADR-027). Pass an explicit range
+to override it, ending yesterday at the latest:
 
 ```bash
-./scripts/bootstrap_fx_rates.sh 2025-01-01 2025-02-02
+./scripts/bootstrap_fx_rates.sh 2026-07-16 2026-10-12
 ```
 
-It exits non-zero if `exchange_rates` is still empty afterwards, and reports how
-many orders have no matching rate.
+It exits non-zero if `exchange_rates` is still empty afterwards, and reports
+orders with no rate before today, and today's orders awaiting one.
 
-Verify: 132 rows (33 dates x 4 currencies) and `Orders with no matching rate: 0`.
+Verify: 356 rows (89 dates x 4 currencies), `Orders with no matching rate: 0`,
+and `Today's orders awaiting tomorrow's rate` above 0.
 
 ### 7. Watermark control tables
 
@@ -268,6 +271,34 @@ Run `transformation/sql/unity_catalog_setup.sql` in the SQL Editor.
 
 Verify: `SHOW SCHEMAS IN retail_dev;` returns `curated`, `served`, `ops`,
 `default`.
+
+---
+
+## Resetting the data
+
+Replaces the data and keeps the infrastructure: no Terraform, no Unity Catalog
+credentials, no Snowflake consent. Reset every layer, not some. The new source
+restarts its sequences, so a curated row left behind with `order_id = 1` would
+take the new order 1 as an update (ADR-027).
+
+1. Snowflake: `TRUNCATE` the 13 raw tables and `audit.pipeline_audit` as
+   `retail_admin`. `TRUNCATE`, unlike `DELETE`, also clears COPY load history.
+2. Unity Catalog: `DROP TABLE` the curated tables, `ops.dead_letter` and
+   `ops.served_manifest`. They are external, so the files stay.
+3. ADLS: delete the top-level directories in `raw`, `curated` and `served`.
+   Delete the contents, never the container: Snowflake's role is assigned on
+   `served`.
+4. Watermarks: `UPDATE pipeline_watermark_control SET last_watermark = '1900-01-01', rows_loaded = NULL`.
+5. Postgres: `DROP SCHEMA retail_oltp CASCADE`, then steps 5 and 6 above.
+   `schema.sql` creates only what is missing, so without the drop the new rows
+   land on the old ones.
+6. `rm -f validation/results/*.json`.
+
+Then the incremental runbook, steps 2 to 8, with four differences:
+`curated_to_served` with `full_reload = true` and `tables` empty;
+`00_register_tables` after it; `dbt build --full-refresh`, because
+`fact_sales` still holds the old rows; `full_reload` back to `false` in the
+job afterwards. Reference numbers: incremental runbook, Reset run, 2026-10-13.
 
 ---
 
