@@ -9,12 +9,10 @@
 #   .env with DATABASE_URL, EXCHANGE_RATE_API_KEY, BASE_CURRENCY, TARGET_CURRENCIES
 #
 # Usage:
-#   ./scripts/bootstrap_fx_rates.sh                    # range derived from orders
-#   ./scripts/bootstrap_fx_rates.sh 2025-01-01 2025-02-02   # explicit range
+#   ./scripts/bootstrap_fx_rates.sh                         # first order date to yesterday
+#   ./scripts/bootstrap_fx_rates.sh 2026-07-16 2026-10-12   # explicit range, ending yesterday at the latest
 
 set -e  # exit immediately if any command fails
-
-BUFFER_DAYS=3  # fetch a few days past the last order, so later orders still convert
 
 # read .env automatically
 if [ -z "$DATABASE_URL" ] && [ -f .env ]; then
@@ -33,7 +31,10 @@ END_DATE="$2"
 if [ -z "$START_DATE" ] || [ -z "$END_DATE" ]; then
   # -t no header, -A unaligned, -c one command: gives a bare value, not a table
   START_DATE=$(psql "$DATABASE_URL" -tAc "SELECT (min(order_date) AT TIME ZONE 'UTC')::date FROM retail_oltp.orders;")
-  END_DATE=$(psql "$DATABASE_URL" -tAc "SELECT (max(order_date) AT TIME ZONE 'UTC')::date + $BUFFER_DAYS FROM retail_oltp.orders;")
+  # Rates are end-of-day, so the API serves up to yesterday; today's orders wait for tomorrow's run
+  END_DATE=$(psql "$DATABASE_URL" -tAc "
+    SELECT least((max(order_date) AT TIME ZONE 'UTC')::date, (now() AT TIME ZONE 'UTC')::date - 1)
+    FROM retail_oltp.orders;")
 fi
 
 if [ -z "$START_DATE" ] || [ -z "$END_DATE" ]; then
@@ -61,6 +62,7 @@ UNCOVERED=$(psql "$DATABASE_URL" -tAc "
   SELECT count(*)
   FROM retail_oltp.orders o
   WHERE o.currency_code <> '${BASE_CURRENCY:-GBP}'
+    AND (o.order_date AT TIME ZONE 'UTC')::date < (now() AT TIME ZONE 'UTC')::date  -- today has no rate yet
     AND NOT EXISTS (
       SELECT 1 FROM retail_oltp.exchange_rates r
       WHERE r.rate_date = (o.order_date AT TIME ZONE 'UTC')::date
@@ -69,3 +71,8 @@ UNCOVERED=$(psql "$DATABASE_URL" -tAc "
 
 echo "Done. exchange_rates holds $ROWS rows ($START_DATE to $END_DATE)."
 echo "Orders with no matching rate: $UNCOVERED"
+AWAITING=$(psql "$DATABASE_URL" -tAc "
+  SELECT count(*) FROM retail_oltp.orders
+  WHERE currency_code <> '${BASE_CURRENCY:-GBP}'
+    AND (order_date AT TIME ZONE 'UTC')::date = (now() AT TIME ZONE 'UTC')::date;")
+echo "Today's orders awaiting tomorrow's rate: $AWAITING"
