@@ -10,8 +10,8 @@ from urllib.parse import urlparse
 
 import psycopg
 
-from lookups import fetch_employees, fetch_products, fetch_stores, stores_open_on
-from order_writer import insert_order
+from lookups import fetch_employees, fetch_products, fetch_stores
+from order_writer import insert_days
 from runtime import get_database_url, setup_logging
 from sales_calendar import business_days, resolve_end_date
 
@@ -83,14 +83,10 @@ def generate_data(args: argparse.Namespace) -> None:
         stores = fetch_stores(connection)
         products = fetch_products(connection)
         employees = fetch_employees(connection)
+        
         logger.info("Generating %d day(s) from %s to %s", len(days), days[0].date(), days[-1].date())
-        order_sequence = 1
-        for business_date in days:
-            trading = stores_open_on(stores, business_date.date())
-            daily_orders = max(1, int(rng.normalvariate(args.orders_per_day, 8)))
-            for _ in range(daily_orders):
-                insert_order(connection, rng, business_date, order_sequence, trading, products, employees, now)
-                order_sequence += 1
+
+        insert_days(connection, rng, days, 1, stores, products, employees, args.orders_per_day, now)
         apply_late_arriving_updates(
             connection,
             rng,
