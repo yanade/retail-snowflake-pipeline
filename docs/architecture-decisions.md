@@ -1746,3 +1746,55 @@ per run, and a retry must not add rows or turn a crash into a data failure.
 - The DAG passes its run_id to `02_curated_to_served`, or `load_raw` counts 0.
 - `ALL PRIVILEGES` on the audit schema is broader than needed; production
   grants USAGE and CREATE TABLE.
+
+
+---
+## ADR-027: A Rolling Source Window Ending Today
+
+### Status
+
+Accepted
+
+### Context
+
+The generator started every history on 2025-01-01, so the pipeline only ever
+saw data more than a year old. Moving the source to the current date exposed
+four assumptions: order times could fall after the run, a closed store kept
+trading, a second same-day run reused order numbers, and FX rates were
+requested for days the API does not serve.
+
+### Decision
+
+- **Window.** `generate_data.py` writes `--days` (90) ending on `--end-date`,
+  today in UTC by default. The run reads the clock once; no order or payment
+  is later than it.
+- **Increments.** `generate_incremental_data.py` continues from the source's
+  own state: every day after the newest order up to today, today alone when
+  caught up, numbering from `count(*) + 1`.
+- **Stores.** Orders go only to stores trading that day; `closed_date` is the
+  last trading day.
+- **FX.** The historical endpoint serves end-of-day rates up to yesterday.
+  `fetch_fx_rates.py` rejects a later `--end`; today's orders wait a day.
+- **A day is published whole.** GBP = 1 exists only for dates with rates
+  (`int_fx_rates_gbp`), so until a day's rates arrive all its lines, GBP
+  included, sit in `fact_sales_rejected` as `missing_fx_rate`: the day's rates
+  have not arrived.
+
+### Alternatives Considered
+
+- **Fixed start date:** repeatable, but never current.
+- **`/latest` rates for today:** replaced by end-of-day later, a false change every day (ADR-022).
+- **GBP = 1 for every date:** GBP lines load today, a partial day looks complete.
+- **Order numbers from `max()` of the text:** parses strings and must skip `-DUPLICATE`.
+
+### Consequences
+
+- `--seed` alone no longer repeats a run; `--seed` with `--end-date` does.
+- Every run leaves today in `fact_sales_rejected`; the next day's run moves it
+  to `fact_sales` (ADR-024).
+- An incremental run after midnight leaves the rest of the previous day empty:
+  the volume per day is right, the spread within it is not.
+- Numbering by count reuses numbers if source orders are deleted. Hard deletes
+  are out of scope.
+- Resetting the source restarts its sequences, so every layer below is reset
+  with it (`rebuild-runbook.md`, Resetting the data).
