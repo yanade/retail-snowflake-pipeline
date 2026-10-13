@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
+from typing import Sequence
 
 import psycopg
 
@@ -15,6 +17,8 @@ class Store:
     store_id: int
     store_type: str
     currency_code: str
+    opened_date: date | None
+    closed_date: date | None
 
 
 @dataclass(frozen=True)
@@ -50,11 +54,13 @@ def fetch_stores(connection: psycopg.Connection) -> list[Store]:
 
     currency_by_country = {"GB": "GBP", "DE": "EUR", "FR": "EUR", "US": "USD", "CA": "CAD"}
     with connection.cursor() as cursor:
-        cursor.execute("select store_id, store_type, country_code from retail_oltp.stores order by store_id")
+        cursor.execute(
+            "select store_id, store_type, country_code, opened_date, closed_date from retail_oltp.stores order by store_id"
+        )
         rows = cursor.fetchall()
     if not rows:
         raise RuntimeError("No stores found. Run seed.py first.")
-    return [Store(row[0], row[1], currency_by_country.get(row[2], "GBP")) for row in rows]
+    return [Store(row[0], row[1], currency_by_country.get(row[2], "GBP"), row[3], row[4]) for row in rows]
 
 
 def fetch_products(connection: psycopg.Connection) -> list[Product]:
@@ -100,3 +106,28 @@ def fetch_employees(connection: psycopg.Connection) -> list[Employee]:
         cursor.execute("select employee_id, store_id from retail_oltp.employees order by employee_id")
         rows = cursor.fetchall()
     return [Employee(row[0], row[1]) for row in rows]
+
+
+def stores_open_on(stores: Sequence[Store], day: date) -> list[Store]:
+    """
+    Return the stores trading on a day.
+
+    Args:
+        stores: All stores.
+        day: Sales day.
+
+    Returns:
+        Stores opened by day and not yet closed; a NULL opened_date counts as open.
+
+    Raises:
+        RuntimeError: If no store is open, so no order could be placed.
+    """
+
+    trading = [
+        store for store in stores
+        if (store.opened_date is None or store.opened_date <= day)
+        and (store.closed_date is None or store.closed_date >= day)  # closed_date is the last trading day
+    ]
+    if not trading:
+        raise RuntimeError(f"No store is open on {day}")
+    return trading
