@@ -137,9 +137,12 @@ This is a fallback only — it is not part of the default seed path.
 ## Generate Transactional Data
 
 ```bash
-python generate_data.py --days 60 --orders-per-day 75 --seed 42
+python generate_data.py --days 90 --orders-per-day 50 --seed 42 --end-date 2026-10-13
 ```
 
 The generator inserts realistic orders, order items, payments, missing customer
 cases, returns, duplicate business keys, invalid payment statuses, unresolved
 product references, and late-arriving updates.
+
+`--end-date` defaults to today in UTC; give it to repeat a run exactly. No
+order or payment is later than the moment the run starts (ADR-027).
