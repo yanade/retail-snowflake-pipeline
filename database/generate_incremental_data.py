@@ -1,8 +1,7 @@
-"""Generate additional days of transactional data for incremental-loading tests.
+"""Simulate source activity since the last order: new orders for every day up to today.
 
-Reuses the shared generator modules: lookups, order_writer and runtime
-Targets a date range that continues after existing data instead of always starting
-at 2025-01-01, so it adds new rows rather than duplicating existing ones.
+Reuses the shared generator modules: lookups, order_writer, runtime and sales_calendar.
+Run load_database.sh first; this script continues existing history, it does not start one.
 """
 
 from __future__ import annotations
@@ -10,17 +9,16 @@ from __future__ import annotations
 import argparse
 import logging
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 
 import psycopg
 
 from lookups import fetch_employees, fetch_products, fetch_stores
-from order_writer import insert_order
+from order_writer import insert_days
 from runtime import get_database_url, setup_logging
+from sales_calendar import catch_up_days
 
 logger = logging.getLogger(__name__)
-
-ANCHOR_DATE = datetime(2025, 1, 1, tzinfo=timezone.utc)
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,72 +29,76 @@ def parse_args() -> argparse.Namespace:
         Parsed CLI arguments.
     """
 
-    parser = argparse.ArgumentParser(description="Append incremental days of order data.")
-    parser.add_argument(
-        "--start-day",
-        type=int,
-        default=None,
-        help="Day offset from 2025-01-01. Omit to auto-continue from the latest existing order date.",
-    )
-    parser.add_argument("--days", type=int, default=2, help="Number of additional days to generate.")
+    parser = argparse.ArgumentParser(description="Append orders for every day since the last order, up to today.")
     parser.add_argument("--orders-per-day", type=int, default=20, help="Approximate orders per day.")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for repeatability.")
     return parser.parse_args()
 
 
-def get_next_start_date(connection: psycopg.Connection) -> datetime:
+def fetch_last_order_date(connection: psycopg.Connection) -> date:
     """
-    Determine where to continue generating from — the day after the
-    latest existing order, or ANCHOR_DATE if no orders exist yet.
+    Return the UTC date of the newest order.
 
     Args:
         connection: Open PostgreSQL connection.
 
     Returns:
-        Start date for the next batch of generated orders.
+        The newest order's date.
+
+    Raises:
+        RuntimeError: If there are no orders, so there is no history to continue.
     """
 
     with connection.cursor() as cursor:
         cursor.execute("select max((order_date at time zone 'UTC')::date) from retail_oltp.orders")
-        (max_date,) = cursor.fetchone()
+        (last_order_date,) = cursor.fetchone()
+    if last_order_date is None:
+        raise RuntimeError("No orders yet. Run scripts/load_database.sh first.")
+    return last_order_date
 
-    if max_date is None:
-        return ANCHOR_DATE
-    return datetime.combine(max_date, datetime.min.time(), tzinfo=timezone.utc) + timedelta(days=1)
+
+def fetch_next_order_sequence(connection: psycopg.Connection) -> int:
+    """
+    Return the next order number sequence, continuing generate_data's numbering.
+
+    Args:
+        connection: Open PostgreSQL connection.
+
+    Returns:
+        Order count plus one; generate_data numbers every order 1..N, duplicates included.
+    """
+
+    with connection.cursor() as cursor:
+        cursor.execute("select count(*) + 1 from retail_oltp.orders")
+        (next_sequence,) = cursor.fetchone()
+    return next_sequence
 
 
 def append_days(args: argparse.Namespace) -> None:
     """
-    Generate and insert additional days of orders, order items, and payments.
+    Insert orders for every day since the last order, up to today.
 
     Args:
         args: Parsed CLI arguments.
     """
 
     rng = random.Random(args.seed)
-    now = datetime.now(timezone.utc)  # the order and payment cap; the full rework is step 2
+    now = datetime.now(timezone.utc)  # one moment for the whole run, so every cap agrees
     database_url = get_database_url()
 
     with psycopg.connect(database_url) as connection:
-        start_date = (
-            ANCHOR_DATE + timedelta(days=args.start_day)
-            if args.start_day is not None
-            else get_next_start_date(connection)
-        )
-        logger.info("Appending %d day(s) starting %s", args.days, start_date.date())
+        days = catch_up_days(fetch_last_order_date(connection), now)
+        first_sequence = fetch_next_order_sequence(connection)
+        logger.info("Appending %d day(s) from %s to %s, orders from #%d",
+                    len(days), days[0].date(), days[-1].date(), first_sequence)
 
         stores = fetch_stores(connection)
         products = fetch_products(connection)
         employees = fetch_employees(connection)
-        order_sequence = 1
-        for day_offset in range(args.days):
-            business_date = start_date + timedelta(days=day_offset)
-            daily_orders = max(1, int(rng.normalvariate(args.orders_per_day, 8)))
-            for _ in range(daily_orders):
-                insert_order(connection, rng, business_date, order_sequence, stores, products, employees, now)
-                order_sequence += 1
+        next_sequence = insert_days(connection, rng, days, first_sequence, stores, products, employees,
+                                    args.orders_per_day, now)
         connection.commit()
-    logger.info("Appended %d day(s) of transactional data.", args.days)
+    logger.info("Appended %d order(s).", next_sequence - first_sequence)
 
 
 def main() -> None:
