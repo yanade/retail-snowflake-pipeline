@@ -5,14 +5,15 @@ from __future__ import annotations
 import argparse
 import logging
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from urllib.parse import urlparse
 
 import psycopg
 
-from lookups import fetch_employees, fetch_products, fetch_stores
+from lookups import fetch_employees, fetch_products, fetch_stores, stores_open_on
 from order_writer import insert_order
 from runtime import get_database_url, setup_logging
+from sales_calendar import business_days, resolve_end_date
 
 logger = logging.getLogger(__name__)  # configured by setup_logging() in main, not at import
 
@@ -26,7 +27,13 @@ def parse_args() -> argparse.Namespace:
     """
 
     parser = argparse.ArgumentParser(description="Generate retail OLTP data.")
-    parser.add_argument("--days", type=int, default=30, help="Number of sales days to generate.")
+    parser.add_argument("--days", type=int, default=90, help="Number of sales days to generate.")
+    parser.add_argument(
+        "--end-date",
+        type=date.fromisoformat,  # argparse calls it on the string, so a bad date fails at parse time
+        default=None,
+        help="Last sales day, YYYY-MM-DD. Defaults to today in UTC.",
+    )
     parser.add_argument("--orders-per-day", type=int, default=50, help="Approximate orders per day.")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for repeatability.")
     return parser.parse_args()
@@ -61,7 +68,8 @@ def generate_data(args: argparse.Namespace) -> None:
     """
 
     rng = random.Random(args.seed)
-    start_date = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)  # one moment for the whole run, so every cap agrees
+    days = business_days(resolve_end_date(args.end_date, now), args.days)
 
     database_url = get_database_url()
     parsed = urlparse(database_url)
@@ -75,12 +83,13 @@ def generate_data(args: argparse.Namespace) -> None:
         stores = fetch_stores(connection)
         products = fetch_products(connection)
         employees = fetch_employees(connection)
+        logger.info("Generating %d day(s) from %s to %s", len(days), days[0].date(), days[-1].date())
         order_sequence = 1
-        for day_offset in range(args.days):
-            business_date = start_date + timedelta(days=day_offset)
+        for business_date in days:
+            trading = stores_open_on(stores, business_date.date())
             daily_orders = max(1, int(rng.normalvariate(args.orders_per_day, 8)))
             for _ in range(daily_orders):
-                insert_order(connection, rng, business_date, order_sequence, stores, products, employees)
+                insert_order(connection, rng, business_date, order_sequence, trading, products, employees, now)
                 order_sequence += 1
         apply_late_arriving_updates(
             connection,
