@@ -9,7 +9,7 @@ from typing import Sequence
 
 import psycopg
 
-from lookups import Employee, Product, Store
+from lookups import Employee, Product, Store, stores_open_on
 from sales_calendar import order_timestamp
 
 COUNTRIES = ["GB", "DE", "FR", "US", "CA", "AU", None]
@@ -340,3 +340,42 @@ def insert_order(
         )
     insert_payment(connection, rng, order_id, order_date, total, store.currency_code, status, now)
     return order_id
+
+
+def insert_days(
+    connection: psycopg.Connection,
+    rng: random.Random,
+    days: Sequence[datetime],
+    first_sequence: int,
+    stores: Sequence[Store],
+    products: Sequence[Product],
+    employees: Sequence[Employee],
+    orders_per_day: int,
+    now: datetime,
+) -> int:
+    """
+    Insert about orders_per_day orders for each day, only at stores trading that day.
+
+    Args:
+        connection: Open PostgreSQL connection.
+        rng: Random number generator.
+        days: Midnight UTC of each sales day.
+        first_sequence: Number for the first order; continues the source's numbering.
+        stores: All stores; filtered per day.
+        products: Product lookup rows.
+        employees: Employee lookup rows.
+        orders_per_day: Mean daily order count.
+        now: The run's clock; no order or payment is later.
+
+    Returns:
+        The next free order sequence.
+    """
+
+    order_sequence = first_sequence
+    for business_date in days:
+        trading = stores_open_on(stores, business_date.date())
+        daily_orders = max(1, int(rng.normalvariate(orders_per_day, 8)))
+        for _ in range(daily_orders):
+            insert_order(connection, rng, business_date, order_sequence, trading, products, employees, now)
+            order_sequence += 1
+    return order_sequence
