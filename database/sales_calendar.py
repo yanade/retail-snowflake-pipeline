@@ -67,3 +67,26 @@ def order_timestamp(rng: random.Random, business_date: datetime, now: datetime) 
 
     elapsed = int((now - business_date).total_seconds() // 60)  # minutes of the day already passed
     return business_date + timedelta(minutes=rng.randint(0, min(MINUTES_PER_DAY - 1, elapsed)))
+
+
+def catch_up_days(last_order_date: date, now: datetime) -> list[datetime]:
+    """
+    Return the sales days since the last order, up to today; today alone when already caught up.
+
+    Args:
+        last_order_date: UTC date of the newest order in the source.
+        now: The run's clock, UTC-aware.
+
+    Returns:
+        Midnight UTC of each day to generate, oldest first.
+
+    Raises:
+        ValueError: If the newest order is after today.
+    """
+
+    today = now.date()
+    if last_order_date > today:
+        raise ValueError(f"Newest order is on {last_order_date}, after today {today}; check the machine clock")
+    if last_order_date == today:
+        return business_days(today, 1)  # caught up: top up today, so every simulation adds rows
+    return business_days(today, (today - last_order_date).days)
