@@ -1,6 +1,6 @@
 """Generate additional days of transactional data for incremental-loading tests.
 
-Reuses database/generate_data.py's helpers.
+Reuses the shared generator modules: lookups, order_writer and runtime
 Targets a date range that continues after existing data instead of always starting
 at 2025-01-01, so it adds new rows rather than duplicating existing ones.
 """
@@ -8,19 +8,17 @@ at 2025-01-01, so it adds new rows rather than duplicating existing ones.
 from __future__ import annotations
 
 import argparse
+import logging
 import random
 from datetime import datetime, timedelta, timezone
 
 import psycopg
 
-from generate_data import (
-    get_database_url,
-    logger,
-    fetch_stores,
-    fetch_products,
-    fetch_employees,
-    insert_order,
-)
+from lookups import fetch_employees, fetch_products, fetch_stores
+from order_writer import insert_order
+from runtime import get_database_url, setup_logging
+
+logger = logging.getLogger(__name__)
 
 ANCHOR_DATE = datetime(2025, 1, 1, tzinfo=timezone.utc)
 
@@ -103,6 +101,7 @@ def append_days(args: argparse.Namespace) -> None:
 def main() -> None:
     """Parse CLI arguments and append incremental data."""
 
+    setup_logging()
     append_days(parse_args())
 
 

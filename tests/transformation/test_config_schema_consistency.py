@@ -1,12 +1,10 @@
 
 import pytest
 
-from generate_data import ORDER_STATUSES, PAYMENT_STATUSES
 from transformation.config.table_config import TABLE_CONFIGS
 from pyspark.sql.types import StringType, StructField
-
 from transformation.schemas.source_schemas import SOURCE_SCHEMAS, get_source_schema
-
+from order_writer import ORDER_STATUSES, PAYMENT_STATUSES
 
 INJECTED_BAD_PAYMENT_STATUS = "SETTLED_UNKNOWN"
 

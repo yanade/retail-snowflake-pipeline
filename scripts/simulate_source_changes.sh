@@ -40,7 +40,7 @@ snapshot() {
 echo "Before: $(snapshot)"
 
 echo "Appending ${DAYS} day(s) at about ${ORDERS_PER_DAY} orders per day..."
-# cd database: the generator imports its helpers from generate_data.py next to it
+# cd database: the generator imports its helpers from the modules next to it
 (cd database && python generate_incremental_data.py --days "$DAYS" --orders-per-day "$ORDERS_PER_DAY" --seed "$SEED")
 
 echo "Changing the status of ${UPDATE_COUNT} existing orders..."
