@@ -63,6 +63,7 @@ UNCOVERED=$(psql "$DATABASE_URL" -tAc "
   SELECT count(*)
   FROM retail_oltp.orders o
   WHERE o.currency_code <> '${BASE_CURRENCY:-GBP}'
+    AND (o.order_date AT TIME ZONE 'UTC')::date < (now() AT TIME ZONE 'UTC')::date  -- today has no rate yet
     AND NOT EXISTS (
       SELECT 1 FROM retail_oltp.exchange_rates r
       WHERE r.rate_date = (o.order_date AT TIME ZONE 'UTC')::date
