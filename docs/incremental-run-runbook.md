@@ -49,19 +49,22 @@ Expect 45 to 60 minutes, most of it waiting on ADF and Databricks jobs.
 SEED=11 ./scripts/simulate_source_changes.sh
 ```
 
-Defaults: 2 new days at about 20 orders per day, plus 25 existing orders whose
-status changes. Pass `days orders_per_day updates` to change that. Use a seed
+Defaults: every day from the newest order up to today at about 20 orders per
+day, plus 25 existing orders whose status changes. A second run on the same
+day tops up today. Pass `orders_per_day updates` to change that. Use a seed
 not used before, so the run is a fresh draw.
 
-The script prints a before and after snapshot, and fails if any order ends up
-without an FX rate for its date. The rows are already committed when that
-check fails, so **do not run the script again**. Fetch only the missing dates:
+The script prints a before and after snapshot, and fails if any order before
+today ends up without an FX rate for its date. Today's orders are not
+checked: their rate is published tomorrow (ADR-027). The rows are already
+committed when that check fails, so **do not run the script again**. Fetch
+only the missing dates:
 
 ```bash
-./scripts/bootstrap_fx_rates.sh 2025-02-03 2025-02-06   # first uncovered date, last order date + 3
+./scripts/bootstrap_fx_rates.sh <first uncovered date> <yesterday>
 ```
 
-Without arguments the script refetches every order date. That is safe,
+Without arguments the script refetches every order date up to yesterday. That is safe,
 because a rate that has not changed keeps its `updated_at`, but it costs one
 API call per date, so an explicit range is quicker.
 
@@ -240,6 +243,10 @@ from ecommerce_db.dbt_dev_marts.fact_sales;
 Rows with this run's `loaded_at` must be the new lines plus every line of a
 changed order. With no source changes, `loaded_at` does not move.
 
+Today's lines are in `fact_sales_rejected` as `missing_fx_rate`, every
+currency, GBP included: a day is published whole once its rates arrive
+(ADR-027). After the next day's FX fetch and run they move to `fact_sales`.
+
 **If it fails:**
 
 - `Env var required but not provided`: `.env` not exported in this terminal,
@@ -311,6 +318,23 @@ The SQL watermark database pauses itself after 60 minutes idle, and serverless
 compute stops when the run ends.
 
 ---
+
+## Reset run, 2026-10-13
+
+First run after a full data reset (rebuild runbook, Resetting the data), on 90
+days ending 2026-10-13. Window end `2026-10-13 20:05:18` UTC.
+
+| stage | value |
+|---|---|
+| source | 4562 orders, 13883 lines, 2026-07-16 to 2026-10-13 |
+| exchange_rates | 356 rows, 2026-07-16 to 2026-10-12, 24 orders awaiting a rate |
+| raw_to_curated | order_items 1884 rejected, payments 43 |
+| curated_to_served | 13 snapshots, dead_letter 1927 |
+| load_raw | 13 exports, every one OK |
+| `dbt build --full-refresh` | `PASS=143` |
+| DVT | 32 validations, 0 failed |
+| fact_sales | 11907 rows, 2026-07-16 to 2026-10-12 |
+| fact_sales_rejected | 92 `missing_fx_rate`, all 2026-10-13: EUR 39, GBP 36, CAD 17 |
 
 ## Marts build, 2026-10-06
 
