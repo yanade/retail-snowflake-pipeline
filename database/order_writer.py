@@ -10,6 +10,7 @@ from typing import Sequence
 import psycopg
 
 from lookups import Employee, Product, Store
+from sales_calendar import order_timestamp
 
 COUNTRIES = ["GB", "DE", "FR", "US", "CA", "AU", None]
 FIRST_NAMES = ["Ava", "Oliver", "Sophia", "George", "Isla", "Theo", "Maya", "Leo"]
@@ -225,6 +226,7 @@ def insert_payment(
     total: Decimal,
     currency_code: str,
     order_status: str,
+    now: datetime,
 ) -> None:
     """
     Insert payment rows for an order.
@@ -237,6 +239,7 @@ def insert_payment(
         total: Order total amount.
         currency_code: Payment currency.
         order_status: Parent order status.
+        now: The run's clock; the payment is never later.
     """
 
     if order_status == "CANCELLED":
@@ -261,7 +264,7 @@ def insert_payment(
                 status,
                 amount,
                 currency_code,
-                order_date + timedelta(minutes=rng.randint(1, 30)),
+                min(order_date + timedelta(minutes=rng.randint(1, 30)), now),  # a payment cannot be later than the run
             ),
         )
 
@@ -274,6 +277,7 @@ def insert_order(
     stores: Sequence[Store],
     products: Sequence[Product],
     employees: Sequence[Employee],
+    now: datetime,
 ) -> int:
     """
     Insert one order with lines and payment.
@@ -286,13 +290,14 @@ def insert_order(
         stores: Store lookup rows.
         products: Product lookup rows.
         employees: Employee lookup rows.
+        now: The run's clock; no order or payment is later.
 
     Returns:
         Inserted order ID.
     """
 
     store = rng.choice(stores)
-    order_date = business_date + timedelta(minutes=rng.randint(0, 1439))
+    order_date = order_timestamp(rng, business_date, now)
     order_number = (
         f"ORD-{business_date:%Y%m%d}-DUPLICATE"
         if rng.random() < 0.015
@@ -333,5 +338,5 @@ def insert_order(
             """,
             (subtotal, tax, shipping, discount, total, order_id),
         )
-    insert_payment(connection, rng, order_id, order_date, total, store.currency_code, status)
+    insert_payment(connection, rng, order_id, order_date, total, store.currency_code, status, now)
     return order_id
