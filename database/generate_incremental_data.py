@@ -74,6 +74,7 @@ def append_days(args: argparse.Namespace) -> None:
     """
 
     rng = random.Random(args.seed)
+    now = datetime.now(timezone.utc)  # the order and payment cap; the full rework is step 2
     database_url = get_database_url()
 
     with psycopg.connect(database_url) as connection:
@@ -92,7 +93,7 @@ def append_days(args: argparse.Namespace) -> None:
             business_date = start_date + timedelta(days=day_offset)
             daily_orders = max(1, int(rng.normalvariate(args.orders_per_day, 8)))
             for _ in range(daily_orders):
-                insert_order(connection, rng, business_date, order_sequence, stores, products, employees)
+                insert_order(connection, rng, business_date, order_sequence, stores, products, employees, now)
                 order_sequence += 1
         connection.commit()
     logger.info("Appended %d day(s) of transactional data.", args.days)
