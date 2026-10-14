@@ -30,17 +30,18 @@ Expect 45 to 60 minutes, most of it waiting on ADF and Databricks jobs.
   expires after 30 days: an HTTP 403 on the manifest read means renew it.
 
 - `venv-dbt` built once, separate from `venv` because dbt needs protobuf 6 and
-  PySpark does not, and `SNOWFLAKE_PRIVATE_KEY_PATH` in `.env` for step 7:
+  PySpark does not, and `SNOWFLAKE_PRIVATE_KEY_PATH` in `.env` for step 7.
+  `python` is 3.12 from `.python-version` (ADR-028):
 
   ```bash
-  python3.13 -m venv venv-dbt && ./venv-dbt/bin/pip install -r dbt/requirements.txt
+  python -m venv venv-dbt && ./venv-dbt/bin/pip install -r dbt/requirements.txt
   ```
 
-- `venv-dvt` built once on Python 3.11, because DVT 8.10 pins packages with no
-  3.13 wheels (ADR-025):
+- `venv-dvt` built once, separate because DVT 8.10 pins numpy below 2 and
+  pyarrow below 15 (ADR-025):
 
   ```bash
-  ~/.pyenv/versions/3.11.9/bin/python -m venv venv-dvt && ./venv-dvt/bin/pip install -r validation/requirements.txt
+  python -m venv venv-dvt && ./venv-dvt/bin/pip install -r validation/requirements.txt
   ```
 
 ## 1. Create new and changed rows
