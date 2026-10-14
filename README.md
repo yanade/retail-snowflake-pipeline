@@ -79,7 +79,7 @@ integration with read-only access to that container alone.
 | Orchestration | Apache Airflow |
 | Dashboard | Streamlit |
 | CI | GitHub Actions |
-| Language | Python 3.13, SQL |
+| Language | Python 3.12, SQL |
 
 ---
 
@@ -223,7 +223,7 @@ Planned: orchestration/, dashboard/
 - Azure subscription and the Azure CLI
 - Snowflake account and the Snowflake CLI (`snow`)
 - [freecurrencyapi.com](https://freecurrencyapi.com) API key, free tier
-- Python 3.13, and Java 17 for PySpark
+- Python 3.12 (pinned in `.python-version`), and Java 17 for PySpark
 - Terraform >= 1.6
 - Docker, for a local PostgreSQL
 
