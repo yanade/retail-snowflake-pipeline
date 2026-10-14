@@ -7,6 +7,8 @@ x-airflow-common:
     context: ..                                   # repo root, the Dockerfile copies requirements from dbt/ and validation/
     dockerfile: orchestration/Dockerfile
   image: retail-airflow:dev
+  env_file:
+    - ../.env                                     # project variables: Snowflake, Databricks, DATABASE_URL
   environment:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: LocalExecutor        # tasks run as processes of the scheduler container
@@ -19,6 +21,7 @@ x-airflow-common:
     AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:?set in orchestration/.env}     # shared, or task tokens fail to verify
     AIRFLOW__API_AUTH__JWT_ISSUER: airflow
     PYTHONPATH: /opt/airflow/project              # import audit, loading, validation, utils as in the repo
+    SNOWFLAKE_PRIVATE_KEY_PATH: /home/airflow/.snowflake/rsa_key.p8  # .env holds the Mac path; environment wins over env_file
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
@@ -27,6 +30,8 @@ x-airflow-common:
     - ../utils:/opt/airflow/project/utils:ro
     - ../validation:/opt/airflow/project/validation  # writable: DVT writes results/
     - ../dbt:/opt/airflow/project/dbt                # writable: dbt writes target/ and logs/
+    - ~/.snowflake/connections.toml:/home/airflow/.snowflake/connections.toml:ro
+    - ~/.snowflake/rsa_key.p8:/home/airflow/.snowflake/rsa_key.p8:ro
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     &airflow-common-depends-on
