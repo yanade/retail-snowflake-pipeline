@@ -21,7 +21,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          python-version-file: .python-version   # the project's single Python pin (ADR-028)
           cache: pip       # reuse downloaded packages between runs, keyed on requirements.txt
 
       - name: Set up Java for PySpark
