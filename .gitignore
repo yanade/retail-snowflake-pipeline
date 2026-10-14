@@ -34,11 +34,17 @@ session.sh
 # Generated docs — not part of source
 docs/adls_upload_case_study.html
 
+# dbt
 venv-dbt/
 dbt/target/
 dbt/logs/
 dbt/dbt_packages/
 dbt/.user.yml
 
+# validation
 venv-dvt/
 validation/results/
+
+# orchestration
+venv-orchestration/
+orchestration/logs/
