@@ -875,6 +875,8 @@ guaranteed to stay true: serverless moves on Databricks' schedule, which is the
 reason this ADR argues for declaring `spark.sql.ansi.enabled` explicitly instead
 of relying on the version default.
 
+Amended on 2026-10-14 by ADR-028: the local Python is 3.12, not 3.13.
+
 ### Context
 
 `CLAUDE.md` recorded the transformation stack as Python 3.11 and Spark 3.5.
@@ -1643,7 +1645,7 @@ stays correct when it loads incrementally.
 
 ### Status
 
-Accepted
+Accepted. Amended on 2026-10-14 by ADR-028: `venv-dvt` runs Python 3.12.
 
 ### Context
 
@@ -1798,3 +1800,39 @@ requested for days the API does not serve.
   are out of scope.
 - Resetting the source restarts its sequences, so every layer below is reset
   with it (`rebuild-runbook.md`, Resetting the data).
+
+## ADR-028: One Python Version, 3.12, Across the Project
+
+### Status
+
+Accepted. Amends ADR-015 (local Python) and ADR-025 (`venv-dvt`).
+
+### Context
+
+`venv` and `venv-dbt` ran Python 3.13, `venv-dvt` ran 3.11, and the Airflow
+image needed a version of its own. Code tested on the laptop could then run
+on a different interpreter in Airflow.
+
+### Decision
+
+- Python 3.12 for `venv`, `venv-dbt`, `venv-dvt`, CI and the Airflow image.
+- `.python-version` is the one pin: pyenv reads it locally, CI through
+  `python-version-file`.
+- The three venvs stay. They separate dependencies, not interpreters.
+- 3.12 is the only version every part accepts. Ceiling: DVT 8.10, the latest,
+  pins ibis 7.1, which caps numpy below 2 and pyarrow below 15, with wheels
+  up to cp312. Floor: `raw_loader` uses `itertools.batched`, new in 3.12.
+
+### Alternatives Considered
+
+- **Keep 3.13 and 3.11:** two interpreters in the Airflow image, laptop and image differ.
+- **3.11 everywhere:** loses `itertools.batched` for nothing.
+
+### Consequences
+
+- Verified on 2026-10-14: pytest 310 passed, dbt `PASS=143`, DVT 32/32.
+  Pinned packages kept their versions; unpinned ones drifted without failures.
+- The project moves past 3.12 only when DVT lifts its ibis pin, all at once.
+- On macOS 26 with the SDK 27 Command Line Tools, pyenv builds a 3.12 that
+  crashes in `os.pipe()`. Build with
+  `ac_cv_func_pipe2=no ac_cv_func_dup3=no pyenv install 3.12.11`.
