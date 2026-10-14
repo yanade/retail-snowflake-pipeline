@@ -1,0 +1,5 @@
+# Context is the repo root; only these files may enter the build
+*
+!dbt/requirements.txt
+!validation/requirements.txt
+!orchestration/requirements.txt
