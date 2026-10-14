@@ -1836,3 +1836,56 @@ on a different interpreter in Airflow.
 - On macOS 26 with the SDK 27 Command Line Tools, pyenv builds a 3.12 that
   crashes in `os.pipe()`. Build with
   `ac_cv_func_pipe2=no ac_cv_func_dup3=no pyenv install 3.12.11`.
+
+## ADR-029: Airflow Orchestration on Local Docker Compose
+
+### Status
+
+Accepted. Phase A, the local stack and a smoke task, verified on 2026-10-15.
+
+### Context
+
+Every stage runs by hand from the runbook: ADF, two Databricks jobs, the raw
+load, dbt, DVT, then the audit row. Nothing orders them, retries them or
+reports a failure.
+
+### Decision
+
+- **One DAG, `retail_pipeline`:** `@daily`, created paused, `catchup=False`,
+  `max_active_runs=1`, so watermarks advance one run at a time.
+- **Tasks are `@task` functions calling hooks inside `run_and_record`**
+  (ADR-026), not operators, so every task writes its audit row the same way.
+- **The window end comes from a task, not the schedule.** With
+  `create_cron_data_intervals = False`, the Airflow 3 default, a `@daily` run
+  has a zero-length data interval. `compute_window_end` sets the end and ADF
+  receives it as a parameter.
+- **Airflow 3.3.2 on the official image, Python 3.12 (ADR-028).** dbt and DVT
+  run as subprocesses from `/opt/airflow/venv-dbt` and `/opt/airflow/venv-dvt`.
+  The connector pins in `orchestration/requirements.txt` override the
+  constraints, installed with `apache-airflow` pinned in the same command.
+- **Docker Compose with LocalExecutor:** metadata postgres, api-server,
+  scheduler, dag-processor. The scheduler waits for a healthy api-server, since
+  its tasks report through the Execution API.
+- **Code and secrets are mounted, not baked:** `audit`, `loading`, `utils`
+  read-only, `validation` and `dbt` writable, the root `.env`, and the Snowflake
+  key with `connections.toml` read-only.
+- **Compose secrets fail loudly:** the JWT secret and Fernet key come from
+  `orchestration/.env` through `${VAR:?}`, so a missing one stops startup.
+
+### Alternatives Considered
+
+- **The official compose as is:** Celery, redis and a triggerer for thin tasks on one machine.
+- **One operator per stage:** each would need its own audit wrapping.
+- **`data_interval_end` as the window end:** empty for a cron schedule in Airflow 3.
+- **dbt and DVT in Airflow's environment:** their pins conflict with Airflow's constraints.
+
+### Consequences
+
+- `private_key_file` in `~/.snowflake/connections.toml` must start with `~`:
+  the connector expands it on the laptop and in the container alike.
+- `AIRFLOW_UID` must be the owner of the mounted key files, which are `600`.
+- `venv-orchestration` mirrors the image's environment for the IDE and DAG tests.
+- The image runs Python 3.12.14, the laptop 3.12.11: the same minor, as ADR-028 requires.
+- Retries are not set yet; a cleared task updates its audit row, verified on try 2.
+- Next phases: B load_raw, dbt and DVT; C Databricks, then ADF; D finalize and
+  Slack; E DVT excludes rows updated after the window end; F the schedule is enabled.
