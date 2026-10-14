@@ -183,6 +183,7 @@ retail-snowflake-pipeline/
 ├── dbt/                # staging, intermediate and mart models, tests
 ├── validation/         # DVT suite: reconciliation queries and the runner
 ├── audit/              # pipeline_audit: outcome mappers, writer, recorder
+├── orchestration/      # Airflow: image, local Docker Compose, the retail_pipeline DAG
 ├── snowflake/          # Snowflake DDL: warehouse, role, storage integration, stage, audit table
 ├── terraform/          # Azure infrastructure as code
 ├── utils/              # shared helpers: PostgreSQL URL, logging setup
@@ -191,7 +192,7 @@ retail-snowflake-pipeline/
 ├── docs/               # architecture decisions and runbooks
 └── .github/workflows/  # CI: pytest, terraform fmt and validate
 
-Planned: orchestration/, dashboard/
+Planned: dashboard/
 ```
 
 ---
