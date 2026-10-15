@@ -181,6 +181,9 @@ finish means served rebuilds curated exactly.
 
 ## 6. Load into Snowflake raw
 
+Steps 6 to 8 can also run as one Airflow DAG run, see Steps 6 to 8 through
+Airflow below.
+
 ```bash
 python -m loading.load_raw --dry-run
 ```
@@ -317,6 +320,63 @@ az postgres flexible-server stop --name retail-pipeline-dev-pg --resource-group 
 
 The SQL watermark database pauses itself after 60 minutes idle, and serverless
 compute stops when the run ends.
+
+## Steps 6 to 8 through Airflow
+
+`retail_pipeline` runs `load_raw`, `dbt build` and DVT for one window and
+writes a `pipeline_audit` row per task (ADR-029).
+
+Once per machine:
+
+- Docker Desktop running, at least 4 GB memory.
+- `private_key_file` in `~/.snowflake/connections.toml` starts with `~`, so the
+  same file works in the container.
+- `orchestration/.env` with the compose secrets:
+
+  ```bash
+  printf "AIRFLOW_UID=%s\nAIRFLOW_JWT_SECRET=%s\nAIRFLOW_FERNET_KEY=%s\n" "$(id -u)" "$(openssl rand -hex 32)" "$(./venv-orchestration/bin/python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" > orchestration/.env
+  ```
+
+- `venv-orchestration`, Airflow as in the image, plus pytest for the DAG tests:
+
+  ```bash
+  python -m venv venv-orchestration && ./venv-orchestration/bin/pip install "apache-airflow==3.3.2" --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.12.txt"
+  ```
+
+  ```bash
+  ./venv-orchestration/bin/pip install "apache-airflow==3.3.2" -r orchestration/requirements.txt pytest==9.1.1
+  ```
+
+Start Airflow, UI at http://localhost:8080, `airflow` / `airflow`:
+
+```bash
+docker compose -f orchestration/docker-compose.yml up -d
+```
+
+Trigger with the window end from step 8:
+
+```bash
+docker compose -f orchestration/docker-compose.yml exec airflow-scheduler airflow dags trigger retail_pipeline --conf '{"window_end": "<last_watermark>"}'
+```
+
+Expected in about two minutes: the run `success`, and three audit rows:
+`load_raw` SUCCESS, `dbt_build` SUCCESS, `dvt` SUCCESS with MATCH.
+`rows_ingested` is 0 until Airflow runs the export itself (Phase C).
+
+**If it fails:**
+
+- `ParamValidationError` at trigger: `window_end` missing or not
+  `YYYY-MM-DD HH:MM:SS`. No run is created.
+- `dvt` FAILED with MISMATCH: the data differ, see the failed checks in
+  `details`. FAILED with no `dvt_status`: no usable result, see the task log.
+- Task logs are also in `orchestration/logs/`.
+- Do not run dbt on the laptop during a run: both write `dbt/target/`.
+
+Stop Airflow, keeping its history:
+
+```bash
+docker compose -f orchestration/docker-compose.yml down
+```
 
 ---
 
