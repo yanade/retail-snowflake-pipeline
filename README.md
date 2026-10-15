@@ -184,6 +184,7 @@ retail-snowflake-pipeline/
 ├── validation/         # DVT suite: reconciliation queries and the runner
 ├── audit/              # pipeline_audit: outcome mappers, writer, recorder
 ├── orchestration/      # Airflow: image, local Docker Compose, the retail_pipeline DAG
+├── pipeline/           # runners that start dbt and DVT for Airflow tasks
 ├── snowflake/          # Snowflake DDL: warehouse, role, storage integration, stage, audit table
 ├── terraform/          # Azure infrastructure as code
 ├── utils/              # shared helpers: PostgreSQL URL, logging setup
