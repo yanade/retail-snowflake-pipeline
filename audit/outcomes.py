@@ -7,6 +7,7 @@ from pathlib import Path
 from audit.records import DVT_MATCH, DVT_MISMATCH, DVT_SKIPPED, FAILED, SKIPPED, SUCCESS, TaskOutcome
 from loading.raw_loader import ExportCheck
 from validation.dvt_suite import COUNT_TABLES, RECONCILIATIONS, SOURCE_SCHEMA, failed_rows
+from collections import Counter
 
 DVT_EXIT_MATCH, DVT_EXIT_MISMATCH = 0, 1  # run_validations: 0 all matched, 1 any mismatch
 EXPECTED_DVT_CHECKS = (
@@ -17,7 +18,9 @@ FAILED_CHECK_FIELDS = (
     "check", "validation_name", "group_by_columns", "source_agg_value", "target_agg_value", "validation_status",
 )
 MAX_ERROR_CHARS = 500  # the full traceback stays in the Airflow log
-
+DBT_EXIT_SUCCESS, DBT_EXIT_MODEL_ERROR = 0, 1  # dbt ExitCodes; 2 is dbt itself crashing
+DBT_FAILED_STATUSES = ("error", "fail", "partial success")  # warn and skipped do not fail a build
+DBT_FAILED_NODE_FIELDS = ("unique_id", "status", "message")
 
 def load_dvt_results(path: Path) -> list[dict] | None:
     """
@@ -74,6 +77,56 @@ def dvt_outcome(rows: list[dict] | None, exit_code: int, run_id: str) -> TaskOut
 def _unusable(reason: str) -> TaskOutcome:
     """The DVT task failed without a result to trust: not a data mismatch, so no dvt_status."""
     return TaskOutcome(FAILED, error_message=f"DVT result unusable: {reason}")
+
+
+def load_dbt_results(path: Path) -> list[dict] | None:
+    """
+    Node results of a dbt run_results.json.
+
+    Args:
+        path: dbt/target/run_results.json.
+
+    Returns:
+        One dict per node, or None when dbt wrote no file.
+    """
+    if not path.exists():
+        return None  # dbt stopped before writing results: unknown, not a test failure
+    return json.loads(path.read_text())["results"]
+
+
+def dbt_outcome(results: list[dict] | None, exit_code: int) -> TaskOutcome:
+    """
+    Map one dbt build to an outcome; only results that agree with the exit code are trusted.
+
+    Args:
+        results: From load_dbt_results(); None when no file was written.
+        exit_code: dbt's exit code.
+
+    Returns:
+        SUCCESS with status counts, FAILED with the failed nodes, or FAILED when the result is unusable.
+    """
+    if results is None:
+        return TaskOutcome(FAILED, error_message=f"dbt result unusable: no run_results.json, exit code {exit_code}")
+    if not results:
+        return TaskOutcome(FAILED, error_message="dbt result unusable: no nodes in run_results.json")
+
+    statuses = dict(Counter(result["status"] for result in results))
+    failed = [result for result in results if result["status"] in DBT_FAILED_STATUSES]
+    if exit_code == DBT_EXIT_SUCCESS and not failed:
+        return TaskOutcome(SUCCESS, details={"statuses": statuses})
+    if exit_code == DBT_EXIT_MODEL_ERROR and failed:
+        return TaskOutcome(
+            FAILED,
+            error_message=f"{len(failed)} of {len(results)} dbt nodes failed",
+            details={
+                "statuses": statuses,
+                "failed": [{field: node.get(field) for field in DBT_FAILED_NODE_FIELDS} for node in failed],
+            },
+        )
+    return TaskOutcome(
+        FAILED,
+        error_message=f"dbt result unusable: exit code {exit_code} disagrees with {len(failed)} failed of {len(results)}",
+    )
 
 
 def raw_to_curated_outcome(metrics: dict[str, dict[str, int]]) -> TaskOutcome:

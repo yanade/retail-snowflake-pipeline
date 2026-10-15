@@ -7,7 +7,7 @@ import pytest
 
 from audit.outcomes import (
     EXPECTED_DVT_CHECKS, MAX_ERROR_CHARS, curated_to_served_outcome, dvt_outcome, failure_outcome,
-    load_dvt_results, load_raw_outcome, raw_to_curated_outcome, skipped_outcome,
+    load_dvt_results, load_raw_outcome, raw_to_curated_outcome, skipped_outcome, dbt_outcome, load_dbt_results
 )
 from audit.records import DVT_MATCH, DVT_MISMATCH, DVT_SKIPPED, FAILED, SKIPPED, SUCCESS
 from loading.raw_loader import ExportCheck
@@ -127,3 +127,54 @@ def test_skipped_records_the_reason(validates, dvt_status):
 
     assert (outcome.status, outcome.dvt_status) == (SKIPPED, dvt_status)
     assert outcome.details == {"skip_reason": "upstream_failed"}
+
+
+def _nodes(*statuses: str) -> list[dict]:
+    """dbt run_results 'results', one node per status."""
+    return [{"unique_id": f"model.retail.node_{i}", "status": status, "message": None}
+            for i, status in enumerate(statuses)]
+
+
+def test_dbt_build_with_every_node_passing_is_success_with_status_counts():
+    outcome = dbt_outcome(_nodes("success", "pass", "pass"), 0)
+
+    assert outcome.status == SUCCESS
+    assert outcome.details == {"statuses": {"success": 1, "pass": 2}}
+    assert outcome.rows_ingested is None  # dbt loads nothing: not measured
+
+
+def test_dbt_warn_and_skipped_do_not_fail_the_build():
+    assert dbt_outcome(_nodes("pass", "warn", "skipped"), 0).status == SUCCESS
+
+
+def test_a_failed_dbt_test_is_failed_with_the_node_in_details():
+    outcome = dbt_outcome(_nodes("success", "fail", "skipped"), 1)
+
+    assert outcome.status == FAILED
+    assert outcome.error_message == "1 of 3 dbt nodes failed"
+    assert [node["unique_id"] for node in outcome.details["failed"]] == ["model.retail.node_1"]
+
+
+@pytest.mark.parametrize(("results", "exit_code", "reason"), [
+    (None, 2, "no run_results.json"),         # dbt crashed before writing
+    ([], 0, "no nodes"),                      # nothing built must never be SUCCESS
+    (_nodes("fail"), 0, "disagrees"),         # stale file under a clean exit
+    (_nodes("pass"), 1, "disagrees"),
+    (_nodes("error"), 2, "disagrees"),        # dbt itself crashed
+])
+def test_an_unusable_dbt_result_is_failed(results, exit_code, reason):
+    outcome = dbt_outcome(results, exit_code)
+
+    assert (outcome.status, outcome.dvt_status) == (FAILED, None)
+    assert reason in outcome.error_message
+
+
+def test_missing_run_results_reads_as_none(tmp_path: Path):
+    assert load_dbt_results(tmp_path / "run_results.json") is None
+
+
+def test_run_results_file_yields_its_nodes(tmp_path: Path):
+    path = tmp_path / "run_results.json"
+    path.write_text(json.dumps({"metadata": {}, "results": _nodes("pass")}))
+
+    assert load_dbt_results(path) == _nodes("pass")
