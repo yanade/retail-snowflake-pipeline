@@ -1,9 +1,9 @@
-"""retail_pipeline: Phase A smoke task, proves the image, venvs, mounts and the audit write (ADR-029)."""
+"""retail_pipeline: manual runs with a window end until Phase F; Phase A smoke task (ADR-029)."""
 
 import subprocess
 
 import pendulum
-from airflow.sdk import dag, get_current_context, task
+from airflow.sdk import Param, dag, get_current_context, task
 
 DAG_NAME = "retail_pipeline"
 VENV_PACKAGES = {  # each tool venv's interpreter, and the package that names it
@@ -33,11 +33,17 @@ def venv_versions() -> dict[str, str]:
 
 @dag(
     dag_id=DAG_NAME,
-    schedule="@daily",
+    schedule=None,  # manual runs until Phase F: a required param rules out a schedule
     start_date=pendulum.datetime(2026, 10, 1, tz="UTC"),
     catchup=False,  # explicit: the 3.x default comes from config
     max_active_runs=1,  # watermarks advance one run at a time
     is_paused_upon_creation=True,
+    params={
+        "window_end": Param(  # no default: a run without it is refused at trigger
+            type="string",
+            description="UTC end of the ADF load window, last_watermark in pipeline_watermark_control, e.g. 2026-10-13 20:05:18",
+        ),
+    },
     tags=["retail"],
 )
 def retail_pipeline() -> None:
