@@ -1842,6 +1842,7 @@ on a different interpreter in Airflow.
 ### Status
 
 Accepted. Phase A, the local stack and a smoke task, verified on 2026-10-15.
+Amended on 2026-10-15 for Phase B, see the amendment below.
 
 ### Context
 
@@ -1889,3 +1890,24 @@ reports a failure.
 - Retries are not set yet; a cleared task updates its audit row, verified on try 2.
 - Next phases: B load_raw, dbt and DVT; C Databricks, then ADF; D finalize and
   Slack; E DVT excludes rows updated after the window end; F the schedule is enabled.
+
+### Amendment, 2026-10-15: Phase B, the warehouse half runs in Airflow
+
+- **Tasks.** `load_raw >> dbt_build >> dvt`, each through `run_and_record`.
+  ADF and the Databricks jobs still run by hand until Phase C.
+- **Manual runs until Phase F.** `schedule=None` and a required `window_end`
+  param, the ADF window end, matched to `YYYY-MM-DD HH:MM:SS` at trigger.
+  Airflow refuses a schedule while a param has no default, and a manual run
+  has no logical date.
+- **Runners and mappers.** `pipeline/runners.py` removes the previous results
+  file, runs dbt or DVT from its venv and returns the exit code. `dbt_outcome`
+  and `dvt_outcome` trust a result only when the exit code and the file agree.
+- **DAG tests** in `orchestration/tests/` run in `venv-orchestration` and skip
+  in `venv` and CI, which have no Airflow.
+- **Verified 2026-10-15:** a run with the 2026-10-13 window end was SUCCESS
+  and MATCH. With 2026-10-12 00:00:00 DVT was FAILED + MISMATCH, 32 of 32:
+  `created_at` is when a row reached the source, and the reset inserted every
+  row on 2026-10-13, whatever its business date.
+- **Until Phase C** `load_raw` reports `rows_ingested = 0`: the exports carry
+  the run_id of the manual 02 run.
+- **Supersedes:** "`@daily`, created paused" in the Decision, until Phase F.
