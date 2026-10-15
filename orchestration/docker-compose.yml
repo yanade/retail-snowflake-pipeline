@@ -26,6 +26,7 @@ x-airflow-common:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
     - ../audit:/opt/airflow/project/audit:ro
+    - ../pipeline:/opt/airflow/project/pipeline:ro
     - ../loading:/opt/airflow/project/loading:ro
     - ../utils:/opt/airflow/project/utils:ro
     - ../validation:/opt/airflow/project/validation  # writable: DVT writes results/
